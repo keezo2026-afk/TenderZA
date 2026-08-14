@@ -62,6 +62,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Review-queue admin endpoints (§6). Late import avoids a cycle:
+# review.py needs get_pool from this module.
+from tenderza.api import review as _review  # noqa: E402
+
+app.include_router(_review.router)
+
 
 @app.get("/health")
 def health(pool: ConnectionPool = Depends(get_pool)):

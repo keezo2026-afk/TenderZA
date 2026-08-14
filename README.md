@@ -28,6 +28,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Crawl scheduler: state machine, backoff, source health, append-only results | §5.3 | [`src/tenderza/crawl/scheduler.py`](src/tenderza/crawl/scheduler.py), [`scripts/run_crawler.py`](scripts/run_crawler.py) |
 | Discovery-mode platform fingerprinting (CMS/RSS/sitemap/PDF/WAF detection) | §5.2 | [`src/tenderza/crawl/fingerprint.py`](src/tenderza/crawl/fingerprint.py), [`scripts/discover_sources.py`](scripts/discover_sources.py) |
 | Document pipeline: hash-keyed object store, PDF text extraction w/ OCR detection, rules-based field extraction w/ confidence, tender enrichment + review queue | §6 | [`src/tenderza/documents/`](src/tenderza/documents/), [`scripts/process_documents.py`](scripts/process_documents.py) |
+| Review-queue admin: API (approve/correct/reject w/ human provenance + versioning) and UI at `/review` | §6 human-in-the-loop | [`src/tenderza/api/review.py`](src/tenderza/api/review.py), [`web/app/review/`](web/app/review/) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -128,6 +129,23 @@ tenders under the confidence rule: **a document never overrides a
 higher-confidence field** (the portal's closing date always beats a PDF's),
 and high-stakes fields below 0.80 land in `review_queue` with evidence for
 human confirmation.
+
+### Review queue (human-in-the-loop, §6)
+
+The `/review` page in the web UI lists open items (deadlines first) with the
+extracted value, its confidence, the matched evidence snippet, and a
+"verify at source" link. Reviewer actions:
+
+- **Approve** — value confirmed; applied with provenance
+  `{SOURCE, human:<name>, confidence 1.0}`.
+- **Correct** — reviewer supplies the right value; applied the same way.
+- **Reject** — extraction was wrong; item closes, tender untouched.
+
+Applied changes write a `HUMAN_VERIFIED` version row (§9) and — for closing
+dates — recompute the tender's real status (`OPEN`/`CLOSING_SOON`/`CLOSED`),
+which is what unlocks deadline alerts (§10.3: unverified dates never alert).
+The API endpoints are unauthenticated in v1 (single-operator P1 admin) —
+role-gate before any public deployment.
 
 ## Doctrine (non-negotiable, §6/§17)
 

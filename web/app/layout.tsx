@@ -24,7 +24,10 @@ export default function RootLayout({
                 South African tender search
               </span>
             </Link>
-            <nav className="text-sm text-slate-500">
+            <nav className="flex items-center gap-4 text-sm text-slate-500">
+              <Link href="/review" className="hover:text-slate-900">
+                Review
+              </Link>
               <a
                 href="/api/docs"
                 target="_blank"
