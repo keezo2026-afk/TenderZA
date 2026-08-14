@@ -25,6 +25,8 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | FastAPI read layer: FTS search, filters, tender detail w/ versions, stats | §12 | [`src/tenderza/api/`](src/tenderza/api/) |
 | One-command demo (embedded Postgres + live/sample ingest + API) | — | [`scripts/dev_demo.py`](scripts/dev_demo.py) |
 | Next.js search UI (FTS search, filters, tender detail w/ provenance + history) | §12, P1 UI-v1 | [`web/`](web/) |
+| Crawl scheduler: state machine, backoff, source health, append-only results | §5.3 | [`src/tenderza/crawl/scheduler.py`](src/tenderza/crawl/scheduler.py), [`scripts/run_crawler.py`](scripts/run_crawler.py) |
+| Discovery-mode platform fingerprinting (CMS/RSS/sitemap/PDF/WAF detection) | §5.2 | [`src/tenderza/crawl/fingerprint.py`](src/tenderza/crawl/fingerprint.py), [`scripts/discover_sources.py`](scripts/discover_sources.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -87,6 +89,27 @@ tender detail with key dates, per-field provenance dots, documents (linked to
 the official source, never re-hosted), version history, and full source
 attribution. The browser only talks to Next.js; `/api/*` is proxied
 server-side to FastAPI (`API_URL`, default `http://127.0.0.1:8000`).
+
+### Crawling the registry
+
+```bash
+# Fingerprint DISCOVERY sources & assign generic adapters (§5.2)
+DATABASE_URL=... python scripts/discover_sources.py
+python scripts/discover_sources.py --url https://some.gov.za/tenders  # one-off, no DB
+
+# Run the scheduler: enqueue due sources, execute jobs, retry with backoff (§5.3)
+DATABASE_URL=... python scripts/run_crawler.py            # one pass
+DATABASE_URL=... python scripts/run_crawler.py --loop 300 # continuous
+```
+
+Discovery probes each source politely (one page + feed/sitemap checks),
+classifies the platform (WordPress/Drupal/Joomla → `generic_cms`, feeds →
+`generic_sitemap_rss`, PDF-heavy → `pdf_bulletin`, WAF/JS → triage queue —
+never bypassed), and promotes workable sources to `ACTIVE`. The scheduler
+walks `PENDING → FETCHING → PARSING → DONE | RETRY_BACKOFF | FAILED` with
+exponential backoff (15→240 min, 5 attempts), writes append-only
+`crawl_results`, logs every run to `source_health`, and pushes notices
+through the same normalize→dedupe→version pipeline as the OCDS ingest.
 
 ## Doctrine (non-negotiable, §6/§17)
 
