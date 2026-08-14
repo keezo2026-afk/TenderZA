@@ -368,3 +368,14 @@ CREATE TRIGGER sources_touch BEFORE UPDATE ON sources
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 CREATE TRIGGER tenders_touch BEFORE UPDATE ON tenders
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Views
+-- ---------------------------------------------------------------------------
+
+-- Tender rows with the resolved buyer name — the diffable shape used by the
+-- persistence layer's change detection (§9).
+CREATE VIEW tenders_with_buyer AS
+SELECT t.*, o.name AS buyer_name
+FROM tenders t
+LEFT JOIN organisations o ON o.id = t.buyer_id;

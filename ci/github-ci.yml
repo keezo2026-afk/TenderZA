@@ -44,6 +44,10 @@ jobs:
             -v ON_ERROR_STOP=1 -f db/schema.sql
       - name: Seed registry
         run: |
-          pip install -e .
+          pip install -e ".[dev]"
           DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
             python scripts/seed_registry.py
+      - name: Store integration tests (real Postgres)
+        run: |
+          TEST_DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
+            pytest tests/test_store_integration.py -v

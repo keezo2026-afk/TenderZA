@@ -19,6 +19,9 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Generic CMS adapter (WordPress-first) | §5.2 | [`src/tenderza/adapters/generic_cms.py`](src/tenderza/adapters/generic_cms.py) |
 | PDF-bulletin adapter (content-hash diffing) | §5.2 | [`src/tenderza/adapters/pdf_bulletin.py`](src/tenderza/adapters/pdf_bulletin.py) |
 | Tender-number normalization (dedupe backbone) + golden corpus | §7 | [`src/tenderza/normalize/`](src/tenderza/normalize/), [`tests/fixtures/tender_numbers.json`](tests/fixtures/tender_numbers.json) |
+| Pipeline: normalizer w/ provenance, entity resolution, dedupe + authority merge, computed status | §5.4, §7, §8, §10 | [`src/tenderza/pipeline/`](src/tenderza/pipeline/) |
+| Persistence: tender upsert + version diffs, OCDS mirror archive, review-queue writes | §9, §10.2.6 | [`src/tenderza/persistence/`](src/tenderza/persistence/) |
+| Runnable OCDS ingest (poll / windowed historical backfill) | §3.1 | [`scripts/ingest_ocds.py`](scripts/ingest_ocds.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -38,6 +41,17 @@ psql postgresql://tenderza:tenderza@localhost:5432/tenderza -f db/schema.sql
 # 4. Seed the source registry
 DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
     python scripts/seed_registry.py
+
+# 5. Pull live tenders from the (verified) eTender OCDS API
+DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
+    python scripts/ingest_ocds.py --days 7
+
+# 5b. Historical backfill (~158k releases since May 2021, month-windowed)
+DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
+    python scripts/ingest_ocds.py --backfill 2021-05
+
+# 6. Run store integration tests against your local Postgres (optional)
+TEST_DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza pytest
 ```
 
 ## Doctrine (non-negotiable, §6/§17)
@@ -52,10 +66,12 @@ DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
 
 ## Phase 0 open items
 
-- [ ] Verify the OCDS API base URL, pagination and rate limits from the OpenAPI spec
-      at [data.etenders.gov.za](https://data.etenders.gov.za/) (§3.1). The default in
-      `ocds_api.py` is community-documented and must be confirmed — the endpoint was
-      not reachable from the build sandbox.
+- [x] ~~Verify the OCDS API base URL, pagination and rate limits~~ — **done, live,
+      14 Aug 2026**: `https://ocds-api.etenders.gov.za/api/OCDSReleases`
+      (PageNumber/PageSize/dateFrom/dateTo, `links.next` pagination, PageSize up to
+      1000 browser / ~20k API clients, OCDS 1.1, ocid prefix `ocds-9t57fa`).
+      A real release is pinned as a golden fixture in
+      `tests/fixtures/adapters/ocds_api/real_release_2026-08-14.json`.
 - [ ] Verify/repair the seeded `tender_url`s during discovery mode (§5.2) — several
       provincial/metro URLs are best-effort placeholders flagged `DISCOVERY`.
 - [ ] Business model sign-off (§2.3) and PPA-watch task setup (§17.3).
