@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Municipality Tenders</title>
+  <updated>2026-08-05T10:00:00+02:00</updated>
+  <entry>
+    <title>Tender: Road Maintenance Ward 12</title>
+    <link href="https://example.gov.za/tenders/road-maintenance"/>
+    <id>urn:tender:road-maintenance</id>
+    <updated>2026-08-05T10:00:00+02:00</updated>
+  </entry>
+</feed>

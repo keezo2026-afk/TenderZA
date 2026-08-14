@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Municipality Tenders</title>
+    <link>https://example.gov.za/tenders</link>
+    <description>Tender notices</description>
+    <item>
+      <title>Tender SCM 045/2026: CCTV Supply and Installation</title>
+      <link>https://example.gov.za/tenders/scm-045-2026</link>
+      <description>Supply, installation and maintenance of CCTV systems.</description>
+      <pubDate>Sat, 01 Aug 2026 08:00:00 +0200</pubDate>
+    </item>
+    <item>
+      <title>RFQ 2026/07/0012: Office Furniture</title>
+      <link>https://example.gov.za/tenders/rfq-2026-07-0012</link>
+      <description>Supply and delivery of office furniture.</description>
+      <pubDate>Mon, 03 Aug 2026 09:30:00 +0200</pubDate>
+    </item>
+  </channel>
+</rss>

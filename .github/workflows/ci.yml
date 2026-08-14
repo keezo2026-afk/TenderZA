@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "arena/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check src tests scripts
+      - name: Test
+        run: pytest
+
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tenderza
+          POSTGRES_PASSWORD: tenderza
+          POSTGRES_DB: tenderza
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tenderza"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply schema
+        run: |
+          psql postgresql://tenderza:tenderza@localhost:5432/tenderza \
+            -v ON_ERROR_STOP=1 -f db/schema.sql
+      - name: Seed registry
+        run: |
+          pip install -e .
+          DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
+            python scripts/seed_registry.py
