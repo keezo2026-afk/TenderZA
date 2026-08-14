@@ -27,6 +27,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Next.js search UI (FTS search, filters, tender detail w/ provenance + history) | §12, P1 UI-v1 | [`web/`](web/) |
 | Crawl scheduler: state machine, backoff, source health, append-only results | §5.3 | [`src/tenderza/crawl/scheduler.py`](src/tenderza/crawl/scheduler.py), [`scripts/run_crawler.py`](scripts/run_crawler.py) |
 | Discovery-mode platform fingerprinting (CMS/RSS/sitemap/PDF/WAF detection) | §5.2 | [`src/tenderza/crawl/fingerprint.py`](src/tenderza/crawl/fingerprint.py), [`scripts/discover_sources.py`](scripts/discover_sources.py) |
+| Document pipeline: hash-keyed object store, PDF text extraction w/ OCR detection, rules-based field extraction w/ confidence, tender enrichment + review queue | §6 | [`src/tenderza/documents/`](src/tenderza/documents/), [`scripts/process_documents.py`](scripts/process_documents.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -110,6 +111,23 @@ walks `PENDING → FETCHING → PARSING → DONE | RETRY_BACKOFF | FAILED` with
 exponential backoff (15→240 min, 5 attempts), writes append-only
 `crawl_results`, logs every run to `source_health`, and pushes notices
 through the same normalize→dedupe→version pipeline as the OCDS ingest.
+
+### Document pipeline (§6)
+
+```bash
+DATABASE_URL=... python scripts/process_documents.py --store-root ./data/objects
+```
+
+Fetches unprocessed `tender_documents`, stores bytes by SHA-256 content hash
+(same bulletin on two pages = one object), extracts text via PyMuPDF
+(textless/scanned PDFs are flagged `needs_ocr` for the OCR stage — never
+faked), runs the rules-based field extractor (tender number, closing
+date/time, briefing + compulsory flag, CIDB grades, B-BBEE level, contacts,
+estimated value — each with confidence + evidence snippet), then enriches
+tenders under the confidence rule: **a document never overrides a
+higher-confidence field** (the portal's closing date always beats a PDF's),
+and high-stakes fields below 0.80 land in `review_queue` with evidence for
+human confirmation.
 
 ## Doctrine (non-negotiable, §6/§17)
 

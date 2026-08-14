@@ -47,10 +47,11 @@ jobs:
           pip install -e ".[dev]"
           DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
             python scripts/seed_registry.py
-      - name: Store + scheduler integration tests (real Postgres)
+      - name: Integration tests (real Postgres)
         run: |
           TEST_DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
-            pytest tests/test_store_integration.py tests/test_scheduler_integration.py -v
+            pytest tests/test_store_integration.py tests/test_scheduler_integration.py \
+                   tests/test_processor_integration.py -v
 
   web:
     runs-on: ubuntu-latest

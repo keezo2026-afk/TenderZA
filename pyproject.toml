@@ -15,6 +15,7 @@ dependencies = [
     "psycopg-pool>=3.2",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]
