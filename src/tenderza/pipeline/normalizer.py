@@ -113,6 +113,8 @@ def normalize_notice(
         normalized_tender_number=normalize_tender_number(notice.tender_number),
         buyer_name=notice.buyer_name,
         description=notice.description,
+        province=notice.province,
+        categories=list(notice.categories),
         published_at=_ensure_tz(notice.published_at),
         briefing_at=_ensure_tz(notice.briefing_at),
         compulsory_briefing=notice.compulsory_briefing,

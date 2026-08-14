@@ -53,6 +53,21 @@ def fingerprint(tender: CanonicalTender) -> str:
     return hashlib.sha256(basis.encode()).hexdigest()
 
 
+def natural_key(tender: CanonicalTender) -> str | None:
+    """Closing-date-independent identity: (buyer key, normalized number).
+
+    The fingerprint includes the closing date, so a closing-date EXTENSION
+    (§9's most important change type!) changes the fingerprint. Persistence
+    must therefore look up by natural key first, falling back to fingerprint
+    for records without a tender number. Returns None when either component
+    is missing — a bare title is not a safe identity.
+    """
+    buyer_key = tender.buyer_org_id or normalize_org_name(tender.buyer_name)
+    if not buyer_key or not tender.normalized_tender_number:
+        return None
+    return f"{buyer_key}|{tender.normalized_tender_number}"
+
+
 def titles_similar(a: str, b: str, threshold: float = 0.6) -> bool:
     """Jaccard token overlap — cheap fuzzy duplicate signal (§7)."""
     ta = set(_WORD.findall(a.casefold()))

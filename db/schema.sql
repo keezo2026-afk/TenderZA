@@ -8,7 +8,7 @@
 --   * crawl_results is append-only (§5.3) — enforced by trigger.
 -- ============================================================================
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_uuid()
+-- gen_random_uuid() is built into PostgreSQL 13+; no pgcrypto needed.
 CREATE EXTENSION IF NOT EXISTS vector;     -- pgvector (tender_embeddings)
 
 -- ---------------------------------------------------------------------------
@@ -113,6 +113,8 @@ CREATE TABLE tenders (
     tender_number             text,
     normalized_tender_number  text,          -- output of the spec'd pure function (§7)
     fingerprint               text,          -- hash(buyer + norm number + title + closing) (§7)
+    natural_key               text,          -- buyer_key|norm_number — closing-date-independent
+                                             -- identity so date extensions update, not fork (§9)
     title                     text NOT NULL,
     description               text,
     buyer_id                  uuid REFERENCES organisations(id),
@@ -143,6 +145,7 @@ CREATE TABLE tenders (
 );
 
 CREATE UNIQUE INDEX idx_tenders_fingerprint ON tenders(fingerprint) WHERE fingerprint IS NOT NULL;
+CREATE UNIQUE INDEX idx_tenders_natural_key ON tenders(natural_key) WHERE natural_key IS NOT NULL;
 CREATE INDEX idx_tenders_norm_number ON tenders(normalized_tender_number);
 CREATE INDEX idx_tenders_buyer ON tenders(buyer_id);
 CREATE INDEX idx_tenders_status ON tenders(status);

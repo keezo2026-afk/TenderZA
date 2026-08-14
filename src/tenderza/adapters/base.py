@@ -68,6 +68,8 @@ class RawTenderNotice:
     tender_number: str | None = None
     buyer_name: str | None = None          # resolved to an organisation later (§7)
     description: str | None = None
+    province: str | None = None
+    categories: list[str] = field(default_factory=list)
     published_at: datetime | None = None   # tz-aware or None — never naive (§10.2.1)
     closing_at: datetime | None = None
     briefing_at: datetime | None = None

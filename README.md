@@ -21,7 +21,9 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Tender-number normalization (dedupe backbone) + golden corpus | §7 | [`src/tenderza/normalize/`](src/tenderza/normalize/), [`tests/fixtures/tender_numbers.json`](tests/fixtures/tender_numbers.json) |
 | Pipeline: normalizer w/ provenance, entity resolution, dedupe + authority merge, computed status | §5.4, §7, §8, §10 | [`src/tenderza/pipeline/`](src/tenderza/pipeline/) |
 | Persistence: tender upsert + version diffs, OCDS mirror archive, review-queue writes | §9, §10.2.6 | [`src/tenderza/persistence/`](src/tenderza/persistence/) |
-| Runnable OCDS ingest (poll / windowed historical backfill) | §3.1 | [`scripts/ingest_ocds.py`](scripts/ingest_ocds.py) |
+| Runnable OCDS ingest (poll / windowed historical backfill / file mode) | §3.1 | [`scripts/ingest_ocds.py`](scripts/ingest_ocds.py) |
+| FastAPI read layer: FTS search, filters, tender detail w/ versions, stats | §12 | [`src/tenderza/api/`](src/tenderza/api/) |
+| One-command demo (embedded Postgres + live/sample ingest + API) | — | [`scripts/dev_demo.py`](scripts/dev_demo.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -52,7 +54,25 @@ DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
 
 # 6. Run store integration tests against your local Postgres (optional)
 TEST_DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza pytest
+
+# 7. Serve the read API
+DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
+    uvicorn tenderza.api.app:app --host 0.0.0.0 --port 8000
 ```
+
+### Zero-setup demo (no Docker needed)
+
+```bash
+pip install -e ".[dev]"
+python scripts/dev_demo.py            # embedded Postgres + schema + seed
+                                      # + live OCDS pull (or bundled real
+                                      # sample data offline) + API on :8000
+```
+
+Then: `GET /tenders?q=cctv`, `GET /tenders?province=Western+Cape&status=OPEN`,
+`GET /tenders?compulsory_briefing=true&closing_within_days=30`,
+`GET /tenders/{id}` (documents + version history + per-field provenance),
+`GET /stats`, `GET /docs` (OpenAPI UI).
 
 ## Doctrine (non-negotiable, §6/§17)
 

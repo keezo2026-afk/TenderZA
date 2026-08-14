@@ -96,6 +96,8 @@ def release_to_notice(release: dict[str, Any], source_id: str, source_url: str) 
     tender_number = tender.get("title") or tender.get("id")
     title = tender.get("description") or tender.get("title") or release.get("ocid", "untitled")
 
+    categories = [c for c in [tender.get("category")] if c]
+
     return RawTenderNotice(
         source_id=source_id,
         source_url=source_url,
@@ -103,6 +105,8 @@ def release_to_notice(release: dict[str, Any], source_id: str, source_url: str) 
         tender_number=tender_number,
         buyer_name=buyer.get("name") or procuring.get("name"),
         description=tender.get("description"),
+        province=tender.get("province") or None,   # eTenders extension
+        categories=categories,
         published_at=_parse_dt(release.get("date")),
         closing_at=_parse_dt(period.get("endDate")),
         briefing_at=briefing_at,

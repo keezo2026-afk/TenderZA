@@ -13,6 +13,10 @@ Explicit window / test pull:
     python scripts/ingest_ocds.py --date-from 2026-08-01 --date-to 2026-08-14 \
         --max-pages 2 --page-size 100
 
+Offline / bulk-download mode (§3.1: the portal also publishes monthly OCDS
+release packages as downloadable JSON — same shape as the API response):
+    python scripts/ingest_ocds.py --from-file release_package.json [...]
+
 Flow per release: archive raw into ocds_records (verbatim, §10.2.6)
 -> release_to_notice -> normalize_notice (provenance/confidence, §10)
 -> TenderStore.upsert_tender (dedupe by fingerprint, version diffs, §7/§9).
@@ -23,19 +27,54 @@ idempotent: ocds_records conflict-ignores, tenders diff to no-op).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 
 from tenderza.adapters.base import SourceConfig
-from tenderza.adapters.ocds_api import OcdsApiAdapter
+from tenderza.adapters.ocds_api import OcdsApiAdapter, release_to_notice
 from tenderza.persistence import TenderStore
 from tenderza.pipeline import normalize_notice
 
 ETENDERS_AUTHORITY = 100  # §8: official national portal
 SOURCE_ID = "etenders-ocds"
+
+
+def ingest_release(store: TenderStore, release: dict, source_url: str,
+                   stats: dict[str, int]) -> None:
+    """Archive one raw release + upsert its canonical tender."""
+    stats["releases"] += 1
+    if store.archive_ocds_release(release):
+        stats["archived"] += 1
+    notice = release_to_notice(release, SOURCE_ID, source_url)
+    tender = normalize_notice(notice, authority_score=ETENDERS_AUTHORITY)
+    result = store.upsert_tender(tender)
+    if result.created:
+        stats["created"] += 1
+    elif result.changed:
+        stats["updated"] += 1
+    else:
+        stats["unchanged"] += 1
+
+
+def ingest_files(conn: psycopg.Connection, paths: list[str]) -> dict[str, int]:
+    """Ingest OCDS release packages (or bare release lists) from JSON files."""
+    store = TenderStore(conn)
+    stats = {"releases": 0, "archived": 0, "created": 0, "updated": 0, "unchanged": 0}
+    for path in paths:
+        payload = json.loads(Path(path).read_text())
+        releases = payload.get("releases") if isinstance(payload, dict) else payload
+        source_url = (
+            payload.get("uri") if isinstance(payload, dict) else None
+        ) or f"file://{path}"
+        for release in releases or []:
+            ingest_release(store, release, source_url, stats)
+        conn.commit()
+    return stats
 
 
 def month_windows(start: str, end: date | None = None):
@@ -108,6 +147,8 @@ def main() -> int:
                         help="backfill month-by-month from this month to today")
     parser.add_argument("--date-from")
     parser.add_argument("--date-to")
+    parser.add_argument("--from-file", nargs="+", metavar="JSON",
+                        help="ingest OCDS release package file(s) instead of the API")
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--max-pages", type=int, default=0, help="0 = unlimited")
     parser.add_argument("--quiet", action="store_true")
@@ -117,6 +158,13 @@ def main() -> int:
     if not dsn:
         print("DATABASE_URL not set", file=sys.stderr)
         return 1
+
+    if args.from_file:
+        with psycopg.connect(dsn) as conn:
+            stats = ingest_files(conn, args.from_file)
+            print(f"Totals: {stats}")
+            print(f"DB counts: {TenderStore(conn).counts()}")
+        return 0
 
     today = datetime.now(timezone.utc).date()
     windows: list[tuple[str, str]]

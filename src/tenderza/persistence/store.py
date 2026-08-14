@@ -26,7 +26,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from tenderza.persistence.diff import classify_change, diff_tender_fields
-from tenderza.pipeline.dedupe import fingerprint
+from tenderza.pipeline.dedupe import fingerprint, natural_key
 from tenderza.pipeline.entity_resolution import normalize_org_name
 from tenderza.pipeline.normalizer import CanonicalTender
 from tenderza.pipeline.status import compute_status
@@ -142,42 +142,56 @@ class TenderStore:
 
     # -- tenders (§9 upsert + versioning) ------------------------------------
 
+    _EXISTING_COLS = """
+        SELECT id, title, tender_number, description, buyer_name,
+               province, status::text AS status, published_at,
+               closing_at, briefing_at, compulsory_briefing,
+               value_estimated, currency, source_urls
+        FROM tenders_with_buyer
+    """
+
     def upsert_tender(self, tender: CanonicalTender) -> UpsertResult:
         fp = fingerprint(tender)
+        nk = natural_key(tender)
         buyer_id = tender.buyer_org_id or self.resolve_or_create_buyer(tender)
         status = compute_status(tender)
         fields = _tender_fields(tender, status)
 
         with self.conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT id, title, tender_number, description, buyer_name,
-                       province, status::text AS status, published_at,
-                       closing_at, briefing_at, compulsory_briefing,
-                       value_estimated, currency, source_urls
-                FROM tenders_with_buyer
-                WHERE fingerprint = %s
-                """,
-                (fp,),
-            )
-            existing = cur.fetchone()
+            # Lookup 1: natural key (buyer + normalized tender number) —
+            # closing-date-independent, so date EXTENSIONS update the same
+            # record instead of forking a new one (§9).
+            existing = None
+            if nk:
+                cur.execute(
+                    self._EXISTING_COLS + " WHERE natural_key = %s", (nk,)
+                )
+                existing = cur.fetchone()
+            # Lookup 2: fingerprint — catches number-less tenders.
+            if existing is None:
+                cur.execute(
+                    self._EXISTING_COLS + " WHERE fingerprint = %s", (fp,)
+                )
+                existing = cur.fetchone()
 
             if existing is None:
-                return self._insert(cur, tender, fp, buyer_id, fields)
-            return self._update(cur, tender, existing, buyer_id, fields)
+                return self._insert(cur, tender, fp, nk, buyer_id, fields)
+            return self._update(cur, tender, existing, fp, buyer_id, fields)
 
-    def _insert(self, cur, tender: CanonicalTender, fp: str, buyer_id, fields) -> UpsertResult:
+    def _insert(
+        self, cur, tender: CanonicalTender, fp: str, nk: str | None, buyer_id, fields
+    ) -> UpsertResult:
         cur.execute(
             """
             INSERT INTO tenders (
-                tender_number, normalized_tender_number, fingerprint, title,
-                description, buyer_id, province, status, published_at,
+                tender_number, normalized_tender_number, fingerprint, natural_key,
+                title, description, buyer_id, province, status, published_at,
                 closing_at, briefing_at, compulsory_briefing, value_estimated,
                 currency, requirements, categories, contact, original_url,
                 source_urls, field_provenance, ocds_ocid
             ) VALUES (
-                %(tender_number)s, %(norm)s, %(fp)s, %(title)s, %(description)s,
-                %(buyer_id)s, %(province)s, %(status)s::tender_status,
+                %(tender_number)s, %(norm)s, %(fp)s, %(nk)s, %(title)s,
+                %(description)s, %(buyer_id)s, %(province)s, %(status)s::tender_status,
                 %(published_at)s, %(closing_at)s, %(briefing_at)s,
                 %(compulsory_briefing)s, %(value_estimated)s, %(currency)s,
                 %(requirements)s, %(categories)s, %(contact)s, %(original_url)s,
@@ -193,6 +207,7 @@ class TenderStore:
                 )},
                 "norm": tender.normalized_tender_number or None,
                 "fp": fp,
+                "nk": nk,
                 "buyer_id": buyer_id,
                 "requirements": Jsonb(tender.requirements),
                 "categories": Jsonb(tender.categories),
@@ -217,7 +232,9 @@ class TenderStore:
         return UpsertResult(tender_id, created=True, changed=False,
                             version_no=1, change_kind="CREATED")
 
-    def _update(self, cur, tender: CanonicalTender, existing, buyer_id, fields) -> UpsertResult:
+    def _update(
+        self, cur, tender: CanonicalTender, existing, fp: str, buyer_id, fields
+    ) -> UpsertResult:
         tender_id = str(existing["id"])
         changes = diff_tender_fields(dict(existing), fields)
 
@@ -235,6 +252,7 @@ class TenderStore:
         cur.execute(
             """
             UPDATE tenders SET
+                fingerprint = %(fp)s,
                 title = %(title)s,
                 tender_number = coalesce(%(tender_number)s, tender_number),
                 description = coalesce(%(description)s, description),
@@ -253,6 +271,7 @@ class TenderStore:
             """,
             {
                 **fields,
+                "fp": fp,
                 "buyer_id": buyer_id,
                 "source_urls": Jsonb(merged_urls),
                 "field_provenance": Jsonb(tender.field_provenance),

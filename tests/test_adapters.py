@@ -68,6 +68,8 @@ class TestOcdsMapping:
         assert notice.compulsory_briefing is True
         assert notice.briefing_at is not None
         assert notice.briefing_at.tzinfo is not None
+        assert notice.province == "KwaZulu-Natal"     # eTenders extension
+        assert notice.categories == ["Sewerage"]
         assert notice.closing_at.isoformat() == "2026-09-16T11:00:00+00:00"
         assert len(notice.documents) == 1
         assert notice.documents[0].url.startswith("https://www.etenders.gov.za/")

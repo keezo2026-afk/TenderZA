@@ -18,7 +18,8 @@ venv/
 .env.*
 
 # Data & artifacts (keep generated data out of git)
-data/
+data/*
+!data/samples/
 *.sqlite3
 
 # OS / editor
