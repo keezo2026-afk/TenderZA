@@ -24,6 +24,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Runnable OCDS ingest (poll / windowed historical backfill / file mode) | §3.1 | [`scripts/ingest_ocds.py`](scripts/ingest_ocds.py) |
 | FastAPI read layer: FTS search, filters, tender detail w/ versions, stats | §12 | [`src/tenderza/api/`](src/tenderza/api/) |
 | One-command demo (embedded Postgres + live/sample ingest + API) | — | [`scripts/dev_demo.py`](scripts/dev_demo.py) |
+| Next.js search UI (FTS search, filters, tender detail w/ provenance + history) | §12, P1 UI-v1 | [`web/`](web/) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -73,6 +74,19 @@ Then: `GET /tenders?q=cctv`, `GET /tenders?province=Western+Cape&status=OPEN`,
 `GET /tenders?compulsory_briefing=true&closing_within_days=30`,
 `GET /tenders/{id}` (documents + version history + per-field provenance),
 `GET /stats`, `GET /docs` (OpenAPI UI).
+
+### Web UI
+
+```bash
+cd web && npm install && npm run build
+API_URL=http://127.0.0.1:8000 npx next start -H 0.0.0.0 -p 3000
+```
+
+Search page with FTS + province/status/deadline/compulsory-briefing filters;
+tender detail with key dates, per-field provenance dots, documents (linked to
+the official source, never re-hosted), version history, and full source
+attribution. The browser only talks to Next.js; `/api/*` is proxied
+server-side to FastAPI (`API_URL`, default `http://127.0.0.1:8000`).
 
 ## Doctrine (non-negotiable, §6/§17)
 
