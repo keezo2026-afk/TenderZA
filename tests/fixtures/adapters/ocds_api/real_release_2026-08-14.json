@@ -1,0 +1,65 @@
+{
+  "_comment": "REAL release captured live from https://ocds-api.etenders.gov.za/api/OCDSReleases on 2026-08-14 (Phase 0 endpoint verification). Golden fixture — do not edit.",
+  "release": {
+    "ocid": "ocds-9t57fa-165050",
+    "id": "ocds-9t57fa-165050-2026-08-14",
+    "date": "2026-08-14T00:00:00Z",
+    "tag": ["compiled"],
+    "initiationType": "tender",
+    "tender": {
+      "id": "165050",
+      "title": "ZNTM01266W",
+      "status": "active",
+      "category": "Sewerage",
+      "province": "KwaZulu-Natal",
+      "deliveryLocation": "Oatlands Farm / Nositha Location - Nositha Location - Margate - 4278",
+      "specialConditions": "The bid document can be downloaded from e-Tender Portal at no cost. However, should any bidder require a printed/hard copy of the bid document, a non-refundable payment must be made for collection thereof as per the banking details indicated below. Proof of payment must be produced upon collection of the bid document. – Proof of original payment receipt, stamped by the Bank (Hard Copy) must be produced. No EFT payments allowed.\r\n\r\nNote: \r\nBidders must ensure that they comply with the Tenderers Notes of this service that is advertised on the Departmental website. \r\nThe Preference points system is applicable for this bid are 80/20, where 20 points of specific goals per project will be allocated.\r\n",
+      "mainProcurementCategory": "works",
+      "additionalProcurementCategories": ["works"],
+      "description": "Department of Education: Sanitation Programme for schools: Ugu District : Nositha Primary School : 5GB",
+      "value": { "amount": 0, "currency": "ZAR" },
+      "documents": [
+        {
+          "id": "7a089338-c79c-4693-8b16-46d0ffedfd6a",
+          "documentType": "basic",
+          "title": "Nositha Primary School BOQ Rev 0.pdf",
+          "description": "Nositha Primary School BOQ Rev 0.pdf",
+          "url": "https://www.etenders.gov.za/home/Download?blobName=7a089338-c79c-4693-8b16-46d0ffedfd6a.pdf&downloadedFileName=Nositha%20Primary%20School%20BOQ%20Rev%200.pdf",
+          "datePublished": "2026-08-14T10:31:52Z",
+          "dateModified": "2026-08-14T10:31:52Z",
+          "format": "pdf",
+          "language": "en"
+        }
+      ],
+      "tenderPeriod": {
+        "startDate": "2026-08-14T00:00:00Z",
+        "endDate": "2026-09-16T11:00:00Z"
+      },
+      "tenderers": [],
+      "procuringEntity": { "id": "320", "name": "Kwazulu Natal - Public Works (Head Office)" },
+      "procurementMethod": "open",
+      "procurementMethodDetails": "Request for Bid(Open-Tender)",
+      "briefingSession": {
+        "isSession": true,
+        "compulsory": true,
+        "date": "2026-08-25T11:00:00Z",
+        "venue": "at Nositha Primary School "
+      },
+      "contactPerson": {
+        "name": "Mr. T. Gwaze",
+        "email": "Tapera.gwaze@kznworks.gov.za",
+        "telephoneNumber": "071-338-5102"
+      }
+    },
+    "planning": {
+      "rationale": "",
+      "budget": { "description": " - " },
+      "documents": []
+    },
+    "parties": [],
+    "buyer": { "id": "320", "name": "Kwazulu Natal - Public Works (Head Office)" },
+    "language": "en-za",
+    "awards": [],
+    "contracts": []
+  }
+}

@@ -45,6 +45,8 @@ class TestOcdsMapping:
     def test_release_to_notice(self):
         release = json.loads((FIXTURES / "ocds_api" / "sample_release.json").read_text())
         notice = release_to_notice(release, source_id="etenders-ocds", source_url="https://x")
+        # eTenders convention: bid number lives in tender.title,
+        # human-readable scope in tender.description (verified live 2026-08-14)
         assert notice.title == "Supply and Installation of CCTV System"
         assert notice.tender_number == "SCM 045/2026"
         assert notice.buyer_name == "eThekwini Metropolitan Municipality"
@@ -53,10 +55,28 @@ class TestOcdsMapping:
         assert notice.raw == release  # verbatim archive for ocds_records (§10.2.6)
         assert len(notice.documents) == 1
 
+    def test_real_release_captured_live(self):
+        """Golden test against a REAL release fetched from the API on 2026-08-14."""
+        payload = json.loads(
+            (FIXTURES / "ocds_api" / "real_release_2026-08-14.json").read_text()
+        )
+        notice = release_to_notice(payload["release"], "etenders-ocds", "https://x")
+        assert notice.tender_number == "ZNTM01266W"
+        assert notice.title.startswith("Department of Education: Sanitation Programme")
+        assert notice.buyer_name == "Kwazulu Natal - Public Works (Head Office)"
+        # briefingSession extension -> compulsory-briefing flag (§10.2.2)
+        assert notice.compulsory_briefing is True
+        assert notice.briefing_at is not None
+        assert notice.briefing_at.tzinfo is not None
+        assert notice.closing_at.isoformat() == "2026-09-16T11:00:00+00:00"
+        assert len(notice.documents) == 1
+        assert notice.documents[0].url.startswith("https://www.etenders.gov.za/")
+
     def test_minimal_release_does_not_crash(self):
         notice = release_to_notice({"ocid": "ocds-abc-1"}, "s", "u")
         assert notice.title == "ocds-abc-1"
         assert notice.closing_at is None
+        assert notice.compulsory_briefing is None  # unknown, not False
 
 
 class TestFeedParsing:
