@@ -29,6 +29,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Discovery-mode platform fingerprinting (CMS/RSS/sitemap/PDF/WAF detection) | §5.2 | [`src/tenderza/crawl/fingerprint.py`](src/tenderza/crawl/fingerprint.py), [`scripts/discover_sources.py`](scripts/discover_sources.py) |
 | Document pipeline: hash-keyed object store, PDF text extraction w/ OCR detection, rules-based field extraction w/ confidence, tender enrichment + review queue | §6 | [`src/tenderza/documents/`](src/tenderza/documents/), [`scripts/process_documents.py`](scripts/process_documents.py) |
 | Review-queue admin: API (approve/correct/reject w/ human provenance + versioning) and UI at `/review` | §6 human-in-the-loop | [`src/tenderza/api/review.py`](src/tenderza/api/review.py), [`web/app/review/`](web/app/review/) |
+| Email alerts v1: saved searches, batched digests, at-most-once, verified-dates-only deadlines; UI at `/alerts` | §14 (P2 MLP) | [`src/tenderza/alerts/`](src/tenderza/alerts/), [`scripts/run_alerts.py`](scripts/run_alerts.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -146,6 +147,24 @@ dates — recompute the tender's real status (`OPEN`/`CLOSING_SOON`/`CLOSED`),
 which is what unlocks deadline alerts (§10.3: unverified dates never alert).
 The API endpoints are unauthenticated in v1 (single-operator P1 admin) —
 role-gate before any public deployment.
+
+### Email alerts v1 (§14, P2 MLP)
+
+```bash
+# Cron entry point — SMTP if configured, dev outbox (.eml files) otherwise
+DATABASE_URL=... [SMTP_HOST=... SMTP_USER=... SMTP_PASSWORD=...] \
+    python scripts/run_alerts.py
+```
+
+Users save searches at `/alerts` (email + keywords + province + optional
+closing window). Each engine run sends **one batched digest per alert**
+(no per-tender spam), records every (alert, tender) pair in `alert_events`
+so nothing is ever notified twice, and enforces the §14 hard rules: the
+engine reads only the normalized tender table; closing-window filters use
+**verified dates only**; unverified dates appear in digests as
+"UNVERIFIED — verify at source" with the date withheld; emails carry
+summaries + links only (never documents). Alert-precision KPI (§16) reads
+from `alert_events.sent_at` vs `clicked_at`.
 
 ## Doctrine (non-negotiable, §6/§17)
 

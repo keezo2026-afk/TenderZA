@@ -19,6 +19,14 @@ Phase 0 verification — DONE (14 Aug 2026, live against the API):
 * Licensing note: the portal's download page says CC BY 4.0; the API's
   release packages declare an Open Data Commons PDDL URL. Either way the
   data is open — attribution retained via source_url (§2.4).
+* KNOWN DATA-QUALITY ISSUE (P0 follow-up): tenderPeriod.endDate values
+  arrive as e.g. "2026-09-16T11:00:00Z", but SA tenders close at 11:00
+  SAST by SCM convention — the portal almost certainly emits SAST wall
+  times mislabeled as UTC (briefing dates show the same pattern; empty
+  briefings are "0001-01-01T00:00:00Z"). Verify against the portal UI for
+  a sample, then decide whether to re-interpret Z as SAST here. Until
+  resolved we store what the source says (provenance = SOURCE) rather
+  than silently rewriting it.
 
 Options (SourceConfig.options):
 

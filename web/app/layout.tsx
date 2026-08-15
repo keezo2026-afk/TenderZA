@@ -25,6 +25,9 @@ export default function RootLayout({
               </span>
             </Link>
             <nav className="flex items-center gap-4 text-sm text-slate-500">
+              <Link href="/alerts" className="hover:text-slate-900">
+                Alerts
+              </Link>
               <Link href="/review" className="hover:text-slate-900">
                 Review
               </Link>
