@@ -95,6 +95,45 @@ the official source, never re-hosted), version history, and full source
 attribution. The browser only talks to Next.js; `/api/*` is proxied
 server-side to FastAPI (`API_URL`, default `http://127.0.0.1:8000`).
 
+Frontend unit tests (no extra dependencies — Node's built-in runner):
+
+```bash
+cd web && npm test
+```
+
+### Search & indexing (§12)
+
+Full-text search covers the title, description **and extracted document
+text**, so a tender is findable by a term that only appears inside its bid
+pack. Four things make it work:
+
+- **Multilingual synonyms** (`src/tenderza/search/synonyms.py`). Queries are
+  expanded across EN/AF/isiZulu before they hit Postgres, so `construction`
+  also matches `bou` and `ukwakhiwa`. Expansion happens **query-side** rather
+  than through a Postgres thesaurus dictionary: a thesaurus needs files in
+  `share/tsearch_data` (unavailable on managed Postgres) and every edit forces
+  a full `REINDEX`.
+- **Match wide, rank narrow.** The `WHERE` clause matches the *expanded*
+  query for recall, but ranking and highlighting use the *literal* query, so
+  a document containing your actual words still wins.
+- **Authority boost.** `authority_score` (0-100, from the source registry)
+  breaks near-ties so the official notice outranks an aggregator's copy of
+  it. It is deliberately a weak signal: relevance dominates.
+- **Highlighting** via `ts_headline`, which stems — searching `cleaning`
+  highlights `cleaned`. Source text is HTML-escaped *before* highlighting,
+  and the frontend parses the `<mark>` delimiters into React elements rather
+  than using `dangerouslySetInnerHTML` (`web/lib/highlight-core.ts`).
+
+Ordering is total (`... , t.id`) in both keyword and browse mode. Without a
+unique final sort key, rows tied on score and deadline may be returned in a
+different order for each page, so a paginating client sees some tenders twice
+and never sees others.
+
+pgvector semantic recall is plumbed through (`search/semantic.py`,
+`tender_embeddings`) but inert until an embedding model is configured; the
+query embedder returns `None` and search degrades to keyword-only rather than
+failing. Embedding errors are never fatal for the same reason.
+
 ### Crawling the registry
 
 ```bash

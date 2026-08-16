@@ -26,6 +26,24 @@ export interface Tender {
   currency: string;
   original_url: string | null;
   source_urls: string[];
+  /**
+   * 0-100 authority of the most authoritative source this tender was seen on
+   * (§12). Used to explain ranking, not to sort client-side.
+   */
+  authority_score?: number | null;
+  /**
+   * Server-rendered `<mark>` highlighting, present only when the request
+   * asked for it and a keyword query was supplied (§12). The backend escapes
+   * the source text before marking it up — see lib/highlight.tsx.
+   */
+  highlight?: TenderHighlight;
+}
+
+export interface TenderHighlight {
+  /** Title with matched terms wrapped in <mark>. */
+  title: string | null;
+  /** Matching fragment of the description/document text, if any. */
+  snippet: string | null;
 }
 
 export interface TenderDetail extends Tender {

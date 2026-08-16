@@ -135,9 +135,21 @@ CREATE TABLE tenders (
     source_urls               jsonb NOT NULL DEFAULT '[]'::jsonb,
     field_provenance          jsonb NOT NULL DEFAULT '{}'::jsonb,  -- per-field source/confidence (§10.2.5)
     ocds_ocid                 text,          -- link back to the OCDS mirror layer
+    -- §12 ranking: authority of the most authoritative source this tender was
+    -- seen on, denormalized off `sources` so ranking is a single-table read.
+    -- Monotonic: a tender seen on an official portal never loses that standing
+    -- because an aggregator republished it.
+    authority_score           smallint NOT NULL DEFAULT 50
+                              CHECK (authority_score BETWEEN 0 AND 100),
+    -- §12 FTS over "extracted document text": the concatenated, capped text of
+    -- this tender's processed documents. Maintained by the document pipeline,
+    -- never by adapters — documents must not overwrite structured fields (§6).
+    document_text             text,
     search_vector             tsvector GENERATED ALWAYS AS (
                                   setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
-                                  setweight(to_tsvector('english', coalesce(description, '')), 'B')
+                                  setweight(to_tsvector('english', coalesce(tender_number, '')), 'A') ||
+                                  setweight(to_tsvector('english', coalesce(description, '')), 'B') ||
+                                  setweight(to_tsvector('english', coalesce(document_text, '')), 'D')
                               ) STORED,
     created_at                timestamptz NOT NULL DEFAULT now(),
     updated_at                timestamptz NOT NULL DEFAULT now(),

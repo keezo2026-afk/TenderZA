@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Tender } from "@/lib/api";
+import { hasMatch, plainText, renderHighlight } from "@/lib/highlight";
 import StatusBadge from "./StatusBadge";
 
 function daysUntil(iso: string | null): number | null {
@@ -43,13 +44,24 @@ export default function TenderCard({ tender }: { tender: Tender }) {
               </span>
             )}
           </div>
-          <h3 className="mt-1 line-clamp-2 font-medium text-slate-900">
-            {tender.title}
+          <h3
+            className="mt-1 line-clamp-2 font-medium text-slate-900"
+            // The rendered title may contain <mark> elements; keep the plain
+            // text available to assistive tech and native tooltips.
+            title={plainText(tender.highlight?.title) || tender.title}
+          >
+            {renderHighlight(tender.highlight?.title, `t-${tender.id}`) ??
+              tender.title}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
             {tender.buyer ?? "Unknown buyer"}
             {tender.province ? ` · ${tender.province}` : ""}
           </p>
+          {hasMatch(tender.highlight?.snippet) && (
+            <p className="mt-2 line-clamp-2 text-sm text-slate-600">
+              {renderHighlight(tender.highlight?.snippet, `s-${tender.id}`)}
+            </p>
+          )}
         </div>
         <div className="shrink-0 text-right text-sm">
           <div className="text-slate-500">Closes</div>

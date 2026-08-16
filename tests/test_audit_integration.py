@@ -234,16 +234,22 @@ class TestReviewTrail:
     def test_resolving_a_review_item_is_audited(self, client, conn, sign_in):
         """The edit and the record of who made it must commit together."""
         from tenderza import audit
-        from tests.test_review_integration import _seed_queued_item
+        from tests.test_review_integration import (
+            _delete_queued_item,
+            _seed_queued_item,
+        )
 
         sign_in(client, "analyst")
         seeded = _seed_queued_item()
-        res = client.post(f"/review/{seeded['item_id']}/resolve",
-                          json={"action": "approve"})
-        assert res.status_code == 200, res.text
+        try:
+            res = client.post(f"/review/{seeded['item_id']}/resolve",
+                              json={"action": "approve"})
+            assert res.status_code == 200, res.text
 
-        entry = _entries(conn, action=audit.REVIEW_RESOLVED)[0]
-        assert entry["record_id"] == seeded["item_id"]
-        assert entry["detail"]["decision"] == "approve"
-        assert entry["detail"]["field"] == "closing_at"
-        assert entry["actor_role"] == "analyst"
+            entry = _entries(conn, action=audit.REVIEW_RESOLVED)[0]
+            assert entry["record_id"] == seeded["item_id"]
+            assert entry["detail"]["decision"] == "approve"
+            assert entry["detail"]["field"] == "closing_at"
+            assert entry["actor_role"] == "analyst"
+        finally:
+            _delete_queued_item(seeded)

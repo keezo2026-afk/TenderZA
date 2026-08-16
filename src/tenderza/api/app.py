@@ -21,6 +21,7 @@ owner-scoped. See tenderza.auth.
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -28,6 +29,8 @@ import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Query
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+
+log = logging.getLogger(__name__)
 
 from tenderza.api.queries import (
     build_count_query,
@@ -90,6 +93,28 @@ def health(pool: ConnectionPool = Depends(get_pool)):
     return {"status": "ok", "counts": counts}
 
 
+def _query_vector(q: str | None) -> str | None:
+    """Embed the query for semantic recall, or None when unavailable (§12).
+
+    Never fatal: if the embedder errors (model down, rate limit), search must
+    degrade to keyword-only rather than 500. A search engine that returns
+    slightly worse results beats one that returns none.
+    """
+    if not q:
+        return None
+    from tenderza.search import semantic
+
+    if not semantic.is_enabled():
+        return None
+    try:
+        embedder = semantic.active_embedder()
+        return semantic.to_pgvector(embedder.embed([q])[0])
+    except Exception:
+        log.warning("query embedding failed; falling back to keyword search",
+                    exc_info=True)
+        return None
+
+
 @app.get("/tenders")
 def search_tenders(
     q: str | None = Query(None, description="Full-text query (websearch syntax)"),
@@ -100,6 +125,9 @@ def search_tenders(
     compulsory_briefing: bool | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    highlight: bool = Query(
+        True, description="Return <mark>-highlighted title/snippet (§12)"
+    ),
     pool: ConnectionPool = Depends(get_pool),
 ):
     try:
@@ -108,6 +136,8 @@ def search_tenders(
             closing_within_days=closing_within_days,
             compulsory_briefing=compulsory_briefing,
             limit=limit, offset=offset,
+            highlight=highlight,
+            query_vector=_query_vector(q),
         )
         count_sql, count_params = build_count_query(
             q=q, province=province, status=status, buyer=buyer,

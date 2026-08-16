@@ -22,8 +22,14 @@ from tenderza.crawl.scheduler import (  # noqa: E402
     enqueue_due_sources,
     run_pending,
 )
+from tenderza.pipeline.normalizer import normalize_tender_number  # noqa: E402
 
 DSN = os.environ.get("TEST_DATABASE_URL")
+
+
+def fake_tender_number(source_id: str) -> str:
+    """Deterministic per-source tender number for the fake adapter."""
+    return f"FAKE {str(source_id).replace('-', '')[:8]}/2026"
 pytestmark = pytest.mark.skipif(
     not DSN, reason="TEST_DATABASE_URL not set (integration tests need Postgres)"
 )
@@ -35,11 +41,16 @@ class _FakeGoodAdapter(Adapter):
     key = "test_good"
 
     def fetch(self):
+        # The tender number must be unique per *source* but stable across
+        # re-crawls of that source: a hardcoded number makes the suite pass
+        # only against a freshly created database, because the second run
+        # dedupes against the row the first run left behind.
+        sid = str(self.config.source_id)
         yield RawTenderNotice(
             source_id=self.config.source_id,
-            source_url="https://fake.gov.za/t/1",
+            source_url=f"https://fake.gov.za/t/{sid}",
             title="Fake Municipal Tender: Road Repairs Ward 3",
-            tender_number="FAKE 001/2026",
+            tender_number=fake_tender_number(sid),
             buyer_name="Fake Municipality",
             closing_at=datetime(2026, 12, 1, 11, 0, tzinfo=timezone.utc),
             raw={"format": "feed"},
@@ -106,11 +117,12 @@ class TestRunJob:
 
         with conn.cursor() as cur:
             # tender landed through the same pipeline (dedupe fields set)
+            number = fake_tender_number(sid)
             cur.execute(
                 "SELECT normalized_tender_number FROM tenders "
-                "WHERE tender_number = 'FAKE 001/2026'"
+                "WHERE tender_number = %s", (number,),
             )
-            assert cur.fetchone()[0] == "fake12026"
+            assert cur.fetchone()[0] == normalize_tender_number(number)
             # append-only crawl result recorded
             cur.execute(
                 "SELECT count(*) FROM crawl_results r JOIN crawl_jobs j "

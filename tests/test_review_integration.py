@@ -35,8 +35,26 @@ def client(sign_in):
 
 @pytest.fixture()
 def queued_item():
-    """A tender with an unverified closing date + a queued review item."""
-    return _seed_queued_item()
+    """A tender with an unverified closing date + a queued review item.
+
+    Cleans up after itself: /review returns a bounded page of open items, so
+    leaked rows from earlier runs eventually push the row under test off the
+    first page and the assertions fail against a re-used database.
+    """
+    seeded = _seed_queued_item()
+    yield seeded
+    _delete_queued_item(seeded)
+
+
+def _delete_queued_item(seeded: dict) -> None:
+    with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM review_queue WHERE tender_id = %s",
+                    (seeded["tender_id"],))
+        cur.execute("DELETE FROM tender_versions WHERE tender_id = %s",
+                    (seeded["tender_id"],))
+        cur.execute("DELETE FROM tenders WHERE id = %s",
+                    (seeded["tender_id"],))
+        conn.commit()
 
 
 def _seed_queued_item():

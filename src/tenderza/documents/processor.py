@@ -48,6 +48,7 @@ class ProcessOutcome:
     deduped: bool = False          # same bytes seen before (content hash hit)
     needs_ocr: bool = False
     fields_found: int = 0
+    indexed: bool = False          # text folded into the tender search index (§12)
     enriched: list[str] | None = None
     queued_for_review: list[str] | None = None
     error: str | None = None
@@ -118,6 +119,11 @@ def process_one(conn: psycopg.Connection, store: ObjectStore,
         text = et.text
         store.put_text(stored.digest, text)
 
+    # §12: make the document text searchable. This is a search-index update,
+    # NOT field enrichment — document text never overrides a structured field
+    # (that path is _enrich_tender below, which applies the confidence rules).
+    out.indexed = _index_document_text(conn, str(doc["tender_id"]), text)
+
     fields = extract_fields(text)
     out.fields_found = len(fields.as_dict())
     if out.fields_found:
@@ -125,6 +131,43 @@ def process_one(conn: psycopg.Connection, store: ObjectStore,
             conn, str(doc["tender_id"]), fields, source_note=f"doc:{stored.digest[:12]}"
         )
     return out
+
+
+# A tsvector must fit in 1 MB and every byte of document_text is re-parsed on
+# every UPDATE of the row. Tender documents are mostly boilerplate (general
+# conditions of contract, SBD forms) whose distinguishing content sits early,
+# so a generous per-tender cap costs almost no recall.
+MAX_INDEXED_CHARS = 200_000
+
+
+def _index_document_text(conn: psycopg.Connection, tender_id: str,
+                         text: str) -> bool:
+    """Fold this document's text into the tender's searchable text (§12).
+
+    Appends rather than replaces, because a tender has many documents and each
+    is processed separately. Idempotent per document: re-processing the same
+    text will not duplicate it.
+    """
+    snippet = " ".join((text or "").split())
+    if not snippet:
+        return False
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT document_text FROM tenders WHERE id = %s", (tender_id,))
+        row = cur.fetchone()
+        if row is None:
+            return False
+        existing = row[0] or ""
+        if snippet in existing:
+            return False            # already indexed (re-run / duplicate doc)
+        combined = (existing + "\n" + snippet).strip() if existing else snippet
+        if len(combined) > MAX_INDEXED_CHARS:
+            combined = combined[:MAX_INDEXED_CHARS]
+        cur.execute(
+            "UPDATE tenders SET document_text = %s, updated_at = now() WHERE id = %s",
+            (combined, tender_id),
+        )
+    return True
 
 
 def _enrich_tender(conn: psycopg.Connection, tender_id: str,

@@ -188,14 +188,15 @@ class TenderStore:
                 title, description, buyer_id, province, status, published_at,
                 closing_at, briefing_at, compulsory_briefing, value_estimated,
                 currency, requirements, categories, contact, original_url,
-                source_urls, field_provenance, ocds_ocid
+                source_urls, field_provenance, ocds_ocid, authority_score
             ) VALUES (
                 %(tender_number)s, %(norm)s, %(fp)s, %(nk)s, %(title)s,
                 %(description)s, %(buyer_id)s, %(province)s, %(status)s::tender_status,
                 %(published_at)s, %(closing_at)s, %(briefing_at)s,
                 %(compulsory_briefing)s, %(value_estimated)s, %(currency)s,
                 %(requirements)s, %(categories)s, %(contact)s, %(original_url)s,
-                %(source_urls)s, %(field_provenance)s, %(ocid)s
+                %(source_urls)s, %(field_provenance)s, %(ocid)s,
+                %(authority_score)s
             )
             RETURNING id
             """,
@@ -216,6 +217,7 @@ class TenderStore:
                 "source_urls": Jsonb(tender.source_urls),
                 "field_provenance": Jsonb(tender.field_provenance),
                 "ocid": tender.raw.get("ocid"),
+                "authority_score": tender.authority_score,
             },
         )
         tender_id = str(cur.fetchone()["id"])
@@ -266,7 +268,13 @@ class TenderStore:
                 value_estimated = coalesce(%(value_estimated)s, value_estimated),
                 currency = %(currency)s,
                 source_urls = %(source_urls)s,
-                field_provenance = %(field_provenance)s
+                field_provenance = %(field_provenance)s,
+                -- §12: monotonic. Seeing the same tender on a low-authority
+                -- aggregator must not demote a notice we found on the
+                -- official portal.
+                authority_score = greatest(
+                    authority_score, %(authority_score)s
+                )
             WHERE id = %(id)s
             """,
             {
@@ -275,6 +283,7 @@ class TenderStore:
                 "buyer_id": buyer_id,
                 "source_urls": Jsonb(merged_urls),
                 "field_provenance": Jsonb(tender.field_provenance),
+                "authority_score": tender.authority_score,
                 "id": tender_id,
             },
         )
