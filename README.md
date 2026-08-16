@@ -118,6 +118,46 @@ If activation is blocked, allow scripts for the current session only:
 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 </details>
 
+<details>
+<summary><strong>Windows (Command Prompt / cmd.exe)</strong></summary>
+
+```bat
+git clone https://github.com/keezo2026-afk/TenderZA.git
+cd TenderZA
+
+py -3.12 -m venv .venv
+.venv\Scripts\activate.bat
+pip install -e ".[dev]"
+
+python scripts\dev_demo.py --days 7
+```
+
+In a **second** Command Prompt window:
+
+```bat
+cd TenderZA\web
+npm install
+
+set API_URL=http://127.0.0.1:8000
+npm run dev
+```
+
+Put `set` on its **own line**, as above. Writing
+`set API_URL=http://127.0.0.1:8000 && npm run dev` on one line silently
+includes the space before `&&` in the value — CMD does not trim it. (The
+config `.trim()`s it defensively, but the habit bites elsewhere.)
+
+Other CMD-specific notes:
+
+- Use backslashes in script paths (`scripts\dev_demo.py`) and `activate.bat`,
+  not the PowerShell `.ps1`.
+- `py -3.12` is the Python launcher. If `py` is missing, invoke your 3.12
+  install directly, e.g. `"C:\Users\<you>\AppData\Local\Programs\Python\Python312\python.exe" -m venv .venv`.
+- Quote the extras — `pip install -e ".[dev]"` — or CMD may mangle the
+  brackets.
+- To stop either server: `Ctrl+C`, then `Y` at "Terminate batch job (Y/N)?".
+</details>
+
 Then open **<http://localhost:3000>**. The API is on **:8000** (`/docs` for the
 OpenAPI UI). The demo prints an admin account — `admin@tenderza.example` /
 `tenderza-demo-admin` — which is what gets you into the role-gated `/review`
