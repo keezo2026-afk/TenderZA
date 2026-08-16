@@ -31,6 +31,9 @@ export default function RootLayout({
               <Link href="/review" className="hover:text-slate-900">
                 Review
               </Link>
+              <Link href="/ops" className="hover:text-slate-900">
+                Health
+              </Link>
               <a
                 href="/api/docs"
                 target="_blank"

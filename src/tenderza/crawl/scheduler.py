@@ -227,7 +227,8 @@ def _record_result(conn, job_id: str, notices, created: int, updated: int) -> No
 
 
 def _touch_source(conn, source_id: str, *, ok: bool, error: str | None = None,
-                  note: str | None = None, terminal: bool = False) -> None:
+                  note: str | None = None, terminal: bool = False,
+                  status_code: int | None = None) -> None:
     with conn.cursor() as cur:
         if ok:
             cur.execute(
@@ -249,12 +250,30 @@ def _touch_source(conn, source_id: str, *, ok: bool, error: str | None = None,
                 """,
                 ("FAILED" if terminal else "DEGRADED", source_id),
             )
+        # mttd_started_at stamps when the CURRENT breakage episode began (§16).
+        # A failure carries forward the open episode's start if one exists, and
+        # otherwise opens a new one at now(); a success closes the episode by
+        # writing NULL. That makes MTTD/MTTR a subtraction rather than a
+        # window-function reconstruction over the whole health log.
         cur.execute(
             """
-            INSERT INTO source_health (source_id, last_success, last_error, status_code)
-            SELECT %s, CASE WHEN %s THEN now() END, %s, NULL
+            INSERT INTO source_health
+                (source_id, checked_at, last_success, last_error, status_code,
+                 mttd_started_at)
+            SELECT %(sid)s,
+                   clock_timestamp(),
+                   CASE WHEN %(ok)s THEN clock_timestamp() END,
+                   %(err)s,
+                   %(code)s,
+                   CASE WHEN %(ok)s THEN NULL ELSE coalesce(
+                       (SELECT sh.mttd_started_at
+                          FROM source_health sh
+                         WHERE sh.source_id = %(sid)s
+                         ORDER BY sh.checked_at DESC
+                         LIMIT 1),
+                       clock_timestamp()) END
             """,
-            (source_id, ok, error),
+            {"sid": source_id, "ok": ok, "err": error, "code": status_code},
         )
 
 

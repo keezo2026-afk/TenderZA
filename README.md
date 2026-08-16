@@ -30,6 +30,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Document pipeline: hash-keyed object store, PDF text extraction w/ OCR detection, rules-based field extraction w/ confidence, tender enrichment + review queue | §6 | [`src/tenderza/documents/`](src/tenderza/documents/), [`scripts/process_documents.py`](scripts/process_documents.py) |
 | Review-queue admin: API (approve/correct/reject w/ human provenance + versioning) and UI at `/review` | §6 human-in-the-loop | [`src/tenderza/api/review.py`](src/tenderza/api/review.py), [`web/app/review/`](web/app/review/) |
 | Email alerts v1: saved searches, batched digests, at-most-once, verified-dates-only deadlines; UI at `/alerts` | §14 (P2 MLP) | [`src/tenderza/alerts/`](src/tenderza/alerts/), [`scripts/run_alerts.py`](scripts/run_alerts.py) |
+| Source-health dashboard + alerting: SLA/MTTD/MTTR classification, `/ops/*` API, `/ops` UI, cron pager | §15, §16 (P2 MLP) | [`src/tenderza/health/`](src/tenderza/health/), [`web/app/ops/`](web/app/ops/), [`scripts/check_source_health.py`](scripts/check_source_health.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -165,6 +166,41 @@ engine reads only the normalized tender table; closing-window filters use
 "UNVERIFIED — verify at source" with the date withheld; emails carry
 summaries + links only (never documents). Alert-precision KPI (§16) reads
 from `alert_events.sent_at` vs `clicked_at`.
+
+### Source-health dashboard & alerting (§15, §16, P2 MLP)
+
+```bash
+# Cron/systemd pager — exit 0 = all clear, 1 = action required, 2 = cannot run
+DATABASE_URL=... python scripts/check_source_health.py --notify ops@example.com
+```
+
+Every registered source is classified into one of seven states —
+`OK · STALE · DEGRADED · FAILED · NEVER_RUN · DISCOVERY · PUBLISH_NOTHING` —
+by pure, clock-injected logic in [`src/tenderza/health/metrics.py`](src/tenderza/health/metrics.py),
+so the same verdict drives the dashboard, the API and the pager and they can
+never disagree. Staleness is `max(tier SLA, 2 × polling interval)`, so a
+daily-tier source is not called stale ten minutes after its window opens, and
+a source known to publish nothing never pages anyone.
+
+| Tier | Freshness SLA (§16) | MTTD target |
+|------|--------------------|-------------|
+| T1 (national portals) | 30 min | 4 h |
+| T2 (metros, big provinces) | 2 h | 4 h |
+| T3 (secondary munis) | 6 h | 24 h |
+| T4 (long tail) | 24 h | 24 h |
+
+The `/ops` page (nav: **Health**) shows the alarm banner first — the same list
+the pager emails — then the §16 KPIs (≥95% of crawlable sources inside SLA,
+≥99% job success), per-tier freshness, adapter health, the per-source table and
+30-day MTTR. Adapter rot is caught by the **silent** flag: runs that succeed but
+yield zero tenders, the signature of a site redesign that quietly broke a parser.
+
+`source_health.mttd_started_at` is stamped by the scheduler: a failure opens an
+episode (or carries the open one forward), a success closes it with `NULL`, so
+MTTD/MTTR is a subtraction rather than a reconstruction over the whole log.
+API: `/ops/overview`, `/ops/sources`, `/ops/alarms`, `/ops/crawl`,
+`/ops/freshness`, `/ops/adapters`, `/ops/failures`. `/ops/alarms` returns 200
+with an empty list when all is well and is safe for an external monitor to poll.
 
 ## Doctrine (non-negotiable, §6/§17)
 
