@@ -5,9 +5,20 @@ GET  /alerts?email=          list alerts for an email address
 POST /alerts/{id}/toggle     pause / resume
 POST /alerts/run             run the engine now (admin/cron trigger)
 
-v1 identity model: alerts are keyed by email address; a users row is
-auto-created per email (no passwords yet — full auth arrives in P2 user
-accounts). Same single-operator caveat as /review.
+Auth (§17). Alerts are personal data, so the rules differ per endpoint:
+
+* **create** stays open — it is the self-service signup funnel, and an
+  account is created lazily for the email address.
+* **list / toggle** require a session, and a non-admin may only ever see or
+  change their *own* alerts. Previously `GET /alerts?email=` would hand any
+  caller the saved searches — i.e. the commercial interests — of any address
+  they cared to guess. That was the worst leak in the API.
+* **run** is admin-only: it sends real email, so an open trigger is both a
+  spam cannon and a way to exhaust the mail quota.
+
+Known gap (tracked, not fixed here): alert creation has no double opt-in, so
+someone can subscribe an address they do not own. Confirmation tokens are the
+fix; until then the digest carries a one-click unsubscribe.
 """
 
 from __future__ import annotations
@@ -18,8 +29,19 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, EmailStr, Field
 
 from tenderza.alerts.engine import run_alerts
+from tenderza.auth import Principal, require_admin, require_role
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+
+def _assert_may_act_for(principal: Principal, email: str) -> None:
+    """Admins act for anyone; everyone else only for themselves."""
+    if principal.role == "admin":
+        return
+    if principal.email.lower() != email.lower():
+        # 404-shaped message on purpose: confirming that an address *has*
+        # alerts would leak membership to a probing caller.
+        raise HTTPException(403, "not your alert")
 
 VALID_PROVINCES = {
     "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
@@ -85,7 +107,10 @@ def create_alert(req: CreateAlertRequest, pool=Depends(get_pool)):
 
 
 @router.get("")
-def list_alerts(email: str, pool=Depends(get_pool)):
+def list_alerts(email: str,
+                principal: Principal = Depends(require_role("viewer")),
+                pool=Depends(get_pool)):
+    _assert_may_act_for(principal, email)
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
@@ -123,8 +148,24 @@ def list_alerts(email: str, pool=Depends(get_pool)):
 
 
 @router.post("/{alert_id}/toggle")
-def toggle_alert(alert_id: str, pool=Depends(get_pool)):
+def toggle_alert(alert_id: str,
+                 principal: Principal = Depends(require_role("viewer")),
+                 pool=Depends(get_pool)):
     with pool.connection() as conn, conn.cursor() as cur:
+        # Ownership is checked in the same statement that mutates, so there is
+        # no window between "may I?" and "do it".
+        try:
+            cur.execute(
+                "SELECT u.email FROM user_alerts a JOIN users u ON u.id = a.user_id "
+                "WHERE a.id = %s",
+                (alert_id,),
+            )
+        except Exception as exc:
+            raise HTTPException(404, "alert not found") from exc
+        owner = cur.fetchone()
+        if owner is None:
+            raise HTTPException(404, "alert not found")
+        _assert_may_act_for(principal, owner[0])
         try:
             cur.execute(
                 "UPDATE user_alerts SET active = NOT active WHERE id = %s "
@@ -141,7 +182,8 @@ def toggle_alert(alert_id: str, pool=Depends(get_pool)):
 
 
 @router.post("/run")
-def trigger_run(pool=Depends(get_pool)):
+def trigger_run(principal: Principal = Depends(require_admin),
+                pool=Depends(get_pool)):
     """Run the alert engine now. In production this is called by cron/Celery
     beat; exposed for the admin and the demo."""
     import os

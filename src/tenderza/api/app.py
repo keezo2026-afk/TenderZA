@@ -12,6 +12,11 @@ Run:
 Trust rules enforced here (§10.3): unverified closing dates are marked
 closing_verified=false with a verify_at_source link; source attribution
 (original_url, source_urls) is always present (§17.1).
+
+Access control (§17): tender search/detail is public — the whole point is
+open access to public procurement data. The admin surfaces are gated:
+/review needs `analyst`, /ops needs `admin`, and alert management is
+owner-scoped. See tenderza.auth.
 """
 
 from __future__ import annotations
@@ -65,12 +70,14 @@ app = FastAPI(
 # Review-queue admin endpoints (§6). Late import avoids a cycle:
 # review.py needs get_pool from this module.
 from tenderza.api import alerts as _alerts  # noqa: E402
+from tenderza.api import auth_routes as _auth  # noqa: E402
 from tenderza.api import health_dashboard as _ops  # noqa: E402
 from tenderza.api import review as _review  # noqa: E402
 
-app.include_router(_review.router)
-app.include_router(_alerts.router)
-app.include_router(_ops.router)
+app.include_router(_auth.router)
+app.include_router(_review.router)   # analyst+
+app.include_router(_alerts.router)   # mixed: signup open, rest owner/admin
+app.include_router(_ops.router)      # admin only
 
 
 @app.get("/health")

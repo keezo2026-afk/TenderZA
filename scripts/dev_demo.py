@@ -28,6 +28,17 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--pgdata", default="/tmp/tenderza-pgdata")
     parser.add_argument("--skip-ingest", action="store_true")
+    parser.add_argument(
+        # NOT a .local address: RFC 6762 reserves it, and the API's EmailStr
+        # validator rejects reserved/special-use domains -- a demo admin that
+        # cannot pass /auth/login's own validation is worse than none.
+        "--demo-admin", default="admin@tenderza.example",
+        help="email of the demo admin account created on first boot",
+    )
+    parser.add_argument(
+        "--demo-password", default="tenderza-demo-admin",
+        help="password for the demo admin (dev only — never reuse in prod)",
+    )
     args = parser.parse_args()
 
     import pgserver
@@ -78,11 +89,47 @@ def main() -> int:
         else:
             print(result.stdout[-500:])
 
+    _seed_demo_admin(dsn, args.demo_admin, args.demo_password)
+
     print(f"[demo] starting API on 0.0.0.0:{args.port} ...")
     import uvicorn
 
     uvicorn.run("tenderza.api.app:app", host="0.0.0.0", port=args.port)
     return 0
+
+
+def _seed_demo_admin(dsn: str, email: str, password: str) -> None:
+    """Create the demo admin so /review and /ops are reachable (§17).
+
+    The admin surfaces are role-gated, so a demo with no accounts would show
+    nothing but sign-in forms. This seeds one known account rather than
+    switching enforcement off, so what you click through locally is the same
+    code path that runs in production.
+    """
+    import psycopg
+
+    from tenderza.auth import hash_password
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT password_hash FROM users WHERE lower(email) = %s",
+                    (email.lower(),))
+        row = cur.fetchone()
+        if row and row[0]:
+            print(f"[demo] admin account {email} already present")
+            return
+        cur.execute(
+            """
+            INSERT INTO users (email, name, password_hash, role)
+            VALUES (%s, 'Demo Admin', %s, 'admin')
+            ON CONFLICT (email) DO UPDATE
+                SET password_hash = EXCLUDED.password_hash,
+                    role = EXCLUDED.role
+            """,
+            (email.lower(), hash_password(password)),
+        )
+        conn.commit()
+    print(f"[demo] created admin account {email} / {password}")
+    print("[demo] sign in at http://localhost:3000/review or /ops")
 
 
 if __name__ == "__main__":

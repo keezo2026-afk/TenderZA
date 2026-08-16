@@ -162,13 +162,16 @@ class TestAlertsApi:
     @pytest.fixture()
     def client(self):
         os.environ["DATABASE_URL"] = DSN
+        os.environ["TENDERZA_AUTH"] = "on"
         from fastapi.testclient import TestClient
 
         from tenderza.api.app import app
         with TestClient(app) as c:
             yield c
 
-    def test_create_list_toggle(self, client):
+    def test_create_list_toggle(self, client, sign_in):
+        """Creation is open (signup funnel); listing and toggling are
+        owner-scoped, so the caller signs in as the alert's owner (§17)."""
         email = f"api-{uuid.uuid4().hex[:8]}@example.co.za"
         res = client.post("/alerts", json={
             "email": email, "keywords": "solar geysers",
@@ -176,6 +179,9 @@ class TestAlertsApi:
         })
         assert res.status_code == 200, res.text
         alert_id = res.json()["alert_id"]
+
+        # Give that same contact a password so they can manage their alerts.
+        sign_in(client, "viewer", email=email)
 
         listed = client.get("/alerts", params={"email": email}).json()
         assert len(listed["alerts"]) == 1

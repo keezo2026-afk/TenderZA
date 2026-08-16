@@ -7,13 +7,15 @@ GET /ops/freshness   per-tier freshness vs the §16 SLA table
 GET /ops/adapters    per-adapter success trend (adapter-rot signal, §15)
 GET /ops/failures    recent errors
 GET /ops/alarms      ONLY the sources that must page a human (§15)
+GET /ops/audit       the security audit trail: logins, role grants, edits (§17)
 
 /ops/alarms returns 200 with an empty list when all is well and is safe
 for an external monitor to poll — the pager script (scripts/check_source_health.py)
 uses the same code path so the dashboard and the pager can never disagree.
 
-Auth note: like /review, v1 is unauthenticated for the single-operator
-admin; role-gate before public deployment.
+Auth (§17): the whole router requires the **admin** role, enforced once at
+router level so a new endpoint added here is gated by default rather than by
+remembering to gate it.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 
+from tenderza.audit import recent as recent_audit
+from tenderza.auth import require_admin
 from tenderza.health import should_page, summarise_verdicts
 from tenderza.health.queries import (
     adapter_health,
@@ -32,7 +36,13 @@ from tenderza.health.queries import (
     source_verdicts,
 )
 
-router = APIRouter(prefix="/ops", tags=["ops"])
+router = APIRouter(
+    prefix="/ops",
+    tags=["ops"],
+    # Operational internals (error strings, crawl targets, failure patterns)
+    # are admin-only: they map the system's weak points for an attacker.
+    dependencies=[Depends(require_admin)],
+)
 
 
 def get_pool():
@@ -114,3 +124,26 @@ def overview(pool=Depends(get_pool)):
     rows.sort(key=lambda r: (r["severity"], -(r["minutes_since_success"] or 0)))
     payload["sources"] = rows
     return payload
+
+
+@router.get("/audit")
+def audit_trail(
+    limit: int = Query(100, ge=1, le=500),
+    action: str | None = Query(None, description="exact action filter, e.g. login.failure"),
+    email: str | None = Query(None, description="substring match on the actor/subject"),
+    pool=Depends(get_pool),
+):
+    """The security trail (§17): who logged in, who granted which role, who
+    changed a tender field.
+
+    Admin-only, like everything under /ops -- a list of which accounts exist
+    and when they last failed a login is exactly the reconnaissance an
+    attacker wants.
+    """
+    with pool.connection() as conn:
+        entries = recent_audit(conn, limit=limit, action=action, email=email)
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }

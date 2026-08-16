@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
+import { RequireRole } from "@/components/RequireRole";
+
 interface ReviewItem {
   id: string;
   field: string;
@@ -48,7 +50,7 @@ function fmt(value: unknown): string {
   return String(value);
 }
 
-export default function ReviewPage() {
+function ReviewQueue() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -252,5 +254,15 @@ export default function ReviewPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+// Resolving a review item stamps human-verified provenance on public data,
+// so the page is analyst-only — matching the server-side gate on /review.
+export default function ReviewPage() {
+  return (
+    <RequireRole role="analyst">
+      <ReviewQueue />
+    </RequireRole>
   );
 }

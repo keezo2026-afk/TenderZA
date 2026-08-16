@@ -203,6 +203,89 @@ API: `/ops/overview`, `/ops/sources`, `/ops/alarms`, `/ops/crawl`,
 `/ops/freshness`, `/ops/adapters`, `/ops/failures`. `/ops/alarms` returns 200
 with an empty list when all is well and is safe for an external monitor to poll.
 
+### Authentication & roles (§11, §17)
+
+Public procurement data is public: **`/tenders`, `/tenders/{id}`, `/stats` and
+`/health` need no login and never will** — open access to this data is the
+product. Only the surfaces that let someone *change* data or see operational
+internals are gated:
+
+| Surface | Requires | Why |
+| --- | --- | --- |
+| `/review*` | `analyst` | Writes verified values into tenders |
+| `/ops/*` | `admin` | Crawler internals, source URLs, failure patterns, audit trail |
+| `POST /alerts` | anyone | Signup funnel; a login wall here kills adoption |
+| `GET/POST /alerts*` (manage) | owner or `admin` | Someone else's alerts are their business |
+
+Roles form a ladder — `viewer < analyst < admin` — so `require_role("analyst")`
+also admits admins. Gates are declared **once per router** rather than per
+endpoint, so a newly added `/ops` route is protected by default instead of by
+remembering to protect it.
+
+**Sessions, not JWTs.** Login mints a 256-bit opaque token; only its SHA-256
+lands in `user_sessions`. That buys instant revocation — disabling a user kills
+their live sessions immediately because session lookup joins on
+`disabled_at IS NULL`, with no token blocklist and no waiting for an expiry.
+The cookie is HttpOnly (JS cannot read it), SameSite=Lax (blocks cross-site
+CSRF POSTs) and Secure over HTTPS. Non-browser clients get the token in the
+login response body.
+
+**Passwords** use stdlib `hashlib.scrypt` (n=2¹⁴, r=8, p=1, ~0.1 s/hash) — no
+new dependency. Parameters are embedded in the stored string, so `needs_rehash`
+transparently upgrades a hash the next time its owner logs in. A NULL
+`password_hash` means an alert-only contact who cannot log in at all.
+
+Login failures are deliberately indistinguishable: wrong address and wrong
+password both return `401 invalid email or password`, and a miss still verifies
+against a dummy hash so response *timing* does not leak which accounts exist.
+The real reason is written to the audit log, where only an admin can read it.
+
+```bash
+# Create the first admin, then manage accounts (passwords are prompted for,
+# never passed as argv — argv is world-readable via `ps` and lands in history).
+DATABASE_URL=... python scripts/manage_users.py create you@example.co.za --role admin
+DATABASE_URL=... python scripts/manage_users.py list
+DATABASE_URL=... python scripts/manage_users.py set-role a@b.com --role analyst
+DATABASE_URL=... python scripts/manage_users.py disable a@b.com   # kills sessions now
+```
+
+Two escape hatches, both opt-in and fail-safe:
+
+- `TENDERZA_AUTH=off` — dev bypass; every request becomes a synthetic admin,
+  a WARNING is logged per use, and `/auth/me` reports `auth_required: false`
+  so the UI stops pretending to be logged out. Anything other than exactly
+  `off` means auth is **on**.
+- `TENDERZA_ADMIN_TOKEN` — a bootstrap header for cron/scripts, compared in
+  constant time and refused if shorter than 16 characters.
+
+`scripts/dev_demo.py` seeds a demo admin (`admin@tenderza.example` /
+`tenderza-demo-admin`, overridable with `--demo-admin` / `--demo-password`) so
+the one-command demo exercises the real login path rather than switching auth off.
+
+### Audit trail (§17)
+
+`audit_logs` records who did what: successful and failed logins (with the
+failure reason the caller is never told), password changes, role grants,
+account create/disable/enable, session revocations and every review-queue
+resolution. Read it at `GET /ops/audit` (admin only — a list of which accounts
+exist and when they last failed a login is exactly what an attacker wants), or
+from the collapsible panel at the bottom of the `/ops` dashboard.
+
+Three properties make it worth trusting:
+
+- **Append-only by convention** — nothing in `src/tenderza/audit.py` updates or
+  deletes. A log you can quietly edit is not evidence.
+- **Transactional** — the audit row is written on the caller's connection, so a
+  tender edit and the record of who made it commit together or not at all.
+- **Never load-bearing** — `record()` swallows its own failures. A full disk
+  must not turn a successful login into a 500.
+
+Secrets never enter the log: no passwords, no hashes, no session tokens. Email
+addresses do, because a failed-login record without the attempted address is
+useless. Actions by the CLI are attributed `cli:user@host`; the service token
+and dev-bypass principals write a NULL `user_id` (their IDs are not real
+foreign keys) and keep their label in `detail.actor`.
+
 ## Doctrine (non-negotiable, §6/§17)
 
 - The crawler is **deterministic**; AI runs only downstream of download, never as a crawl decision.

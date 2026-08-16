@@ -232,14 +232,47 @@ CREATE TABLE tender_embeddings (
 -- Users, companies, alerts (§13, §14)
 -- ---------------------------------------------------------------------------
 
+-- Roles (§11, §17). Deliberately a short ladder:
+--   viewer  — read-only public surface (default for self-served accounts)
+--   analyst — may resolve review-queue items (writes human provenance)
+--   admin   — analyst + ops dashboards + alert engine triggers
+CREATE TYPE user_role AS ENUM ('viewer', 'analyst', 'admin');
+
 CREATE TABLE users (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name          text,
     email         text NOT NULL UNIQUE,
-    password_hash text,
-    role          text NOT NULL DEFAULT 'user',
+    password_hash text,                      -- NULL = alert-only contact, cannot log in
+    role          user_role NOT NULL DEFAULT 'viewer',
+    disabled_at   timestamptz,               -- set to revoke access without deleting history
+    last_login_at timestamptz,
     created_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- Unique, not merely indexed: 'Ops@x.co.za' and 'ops@x.co.za' are the same
+-- mailbox, and two rows for one person would split their alerts and let one
+-- of them be created with a role the other does not have.
+CREATE UNIQUE INDEX idx_users_email_lower ON users(lower(email));
+
+-- Server-side sessions (§17). Opaque tokens, never JWTs: an operator must be
+-- able to revoke access instantly, and a stolen token must die at logout.
+-- Only the SHA-256 of the token is stored, so a database leak does not hand
+-- the attacker live sessions.
+CREATE TABLE user_sessions (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash   bytea NOT NULL UNIQUE,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    expires_at   timestamptz NOT NULL,
+    last_seen_at timestamptz,
+    revoked_at   timestamptz,
+    user_agent   text,
+    ip           inet
+);
+
+CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
+CREATE INDEX idx_user_sessions_live ON user_sessions(expires_at)
+    WHERE revoked_at IS NULL;
 
 CREATE TABLE companies (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -19,17 +19,28 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture()
-def client():
-    """TestClient with a real pool bound to the test database."""
+def client(sign_in):
+    """TestClient with a real pool, signed in as an analyst.
+
+    /review is analyst-gated (§17); the gating itself is covered in
+    tests/test_auth_api_integration.py, so here we just need a valid session.
+    """
     os.environ["DATABASE_URL"] = DSN
+    os.environ["TENDERZA_AUTH"] = "on"
     from tenderza.api.app import app
     with fastapi_testclient.TestClient(app) as c:
+        sign_in(c, "analyst")
         yield c
 
 
 @pytest.fixture()
 def queued_item():
     """A tender with an unverified closing date + a queued review item."""
+    return _seed_queued_item()
+
+
+def _seed_queued_item():
+    """Importable seeding helper (also used by tests/test_audit_integration)."""
     uniq = uuid.uuid4().hex[:8]
     with psycopg.connect(DSN) as conn, conn.cursor() as cur:
         cur.execute(
@@ -105,12 +116,13 @@ class TestListAndStats:
 class TestResolve:
     def test_approve_applies_value_with_human_provenance(self, client, queued_item):
         res = client.post(f"/review/{queued_item['item_id']}/resolve",
-                          json={"action": "approve", "reviewer": "keezo"})
+                          json={"action": "approve"})
         assert res.status_code == 200, res.text
 
         closing_at, prov, latest = _tender_state(queued_item["tender_id"])
         assert prov["closing_at"]["confidence"] == 1.0
-        assert prov["closing_at"]["source_id"] == "human:keezo"
+        # Attribution is the signed-in analyst, not a self-declared name.
+        assert prov["closing_at"]["source_id"].startswith("human:analyst-")
         assert latest[1] == "HUMAN_VERIFIED"          # version row written (§9)
         assert closing_at.isoformat().startswith("2026-09-30")
 

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PROVINCES } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
 
 interface Alert {
   id: string;
@@ -15,6 +16,7 @@ interface Alert {
 }
 
 export default function AlertsPage() {
+  const { user, authenticated } = useAuth();
   const [email, setEmail] = useState("");
   const [keywords, setKeywords] = useState("");
   const [province, setProvince] = useState("");
@@ -24,11 +26,35 @@ export default function AlertsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Listing is owner-scoped server-side (§17): a signed-in caller may only
+  // read their own alerts. Anonymous visitors can still *create* one — that
+  // is the signup funnel — they just cannot enumerate anybody's list.
+  const [listError, setListError] = useState<string | null>(null);
+
   const load = useCallback(async (em: string) => {
     if (!em) return;
     const res = await fetch(`/api/alerts?email=${encodeURIComponent(em)}`);
-    if (res.ok) setAlerts((await res.json()).alerts);
+    if (res.ok) {
+      setAlerts((await res.json()).alerts);
+      setListError(null);
+    } else if (res.status === 401) {
+      setAlerts(null);
+      setListError(
+        "Sign in to manage alerts you have already created. You can still create a new one below."
+      );
+    } else if (res.status === 403) {
+      setAlerts(null);
+      setListError("You can only manage alerts for your own email address.");
+    }
   }, []);
+
+  // A signed-in user should not have to retype the address we already know.
+  useEffect(() => {
+    if (authenticated && user?.email) {
+      setEmail(user.email);
+      load(user.email);
+    }
+  }, [authenticated, user?.email, load]);
 
   async function createAlert(e: React.FormEvent) {
     e.preventDefault();
@@ -61,7 +87,11 @@ export default function AlertsPage() {
   }
 
   async function toggle(id: string) {
-    await fetch(`/api/alerts/${id}/toggle`, { method: "POST" });
+    const res = await fetch(`/api/alerts/${id}/toggle`, { method: "POST" });
+    if (res.status === 401 || res.status === 403) {
+      setError("Sign in as the owner of this alert to pause or resume it.");
+      return;
+    }
     await load(email);
   }
 
@@ -143,6 +173,12 @@ export default function AlertsPage() {
       {error && (
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {listError && (
+        <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-600">
+          {listError}
         </div>
       )}
 

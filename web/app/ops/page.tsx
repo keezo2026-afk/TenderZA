@@ -8,6 +8,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { RequireRole } from "@/components/RequireRole";
+
 interface Verdict {
   source_id: string;
   name: string;
@@ -101,7 +103,7 @@ function age(min: number | null): string {
   return `${(min / 1440).toFixed(1)} d ago`;
 }
 
-export default function OpsPage() {
+function OpsDashboard() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("");
@@ -406,7 +408,109 @@ export default function OpsPage() {
           </details>
         )}
       </section>
+
+      <AuditTrail />
     </div>
+  );
+}
+
+type AuditEntry = {
+  id: number;
+  at: string;
+  action: string;
+  actor: string | null;
+  actor_role: string | null;
+  detail: Record<string, unknown>;
+};
+
+// Security trail (§17). Collapsed by default: it is for answering a question
+// during an incident, not something to stare at all day.
+function AuditTrail() {
+  const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [onlyFailures, setOnlyFailures] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const params = new URLSearchParams({ limit: "50" });
+    if (onlyFailures) params.set("action", "login.failure");
+    fetch(`/api/ops/audit?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`audit unavailable: ${r.status}`);
+        return r.json();
+      })
+      .then((b) => {
+        setEntries(b.entries);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "load failed"));
+  }, [open, onlyFailures]);
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-800">Security audit trail</h2>
+        <div className="flex items-center gap-3">
+          {open && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={onlyFailures}
+                onChange={(e) => setOnlyFailures(e.target.checked)}
+              />
+              failed logins only
+            </label>
+          )}
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+          >
+            {open ? "Hide" : "Show"}
+          </button>
+        </div>
+      </div>
+
+      {open && error && (
+        <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+          {error}
+        </p>
+      )}
+
+      {open && !error && entries === null && (
+        <p className="mt-3 text-xs text-slate-500">Loading…</p>
+      )}
+
+      {open && entries !== null && entries.length === 0 && (
+        <p className="mt-3 text-xs text-slate-500">No matching activity.</p>
+      )}
+
+      {open && entries !== null && entries.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {entries.map((e) => (
+            <li key={e.id} className="font-mono text-[11px] text-slate-600">
+              {new Date(e.at).toLocaleString("en-ZA", {
+                timeZone: "Africa/Johannesburg",
+              })}{" "}
+              · <span className="font-semibold">{e.action}</span> ·{" "}
+              {e.actor ?? "anonymous"}
+              {e.actor_role ? ` (${e.actor_role})` : ""}
+              {typeof e.detail?.reason === "string" ? ` · ${e.detail.reason}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// Ops exposes crawler internals, source URLs and failure detail — admin only,
+// matching the server-side gate on /ops.
+export default function OpsPage() {
+  return (
+    <RequireRole role="admin">
+      <OpsDashboard />
+    </RequireRole>
   );
 }
 

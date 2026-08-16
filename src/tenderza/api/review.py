@@ -14,9 +14,10 @@ Any applied change writes a tender_versions row (change alerts fire on
 corrections, §9). Verified fields then unlock CLOSING_SOON/alerts because
 confidence 1.0 clears every threshold.
 
-Auth note: v1 ships unauthenticated for the P1 admin (single operator);
-role-gating arrives with the users table wiring in P2. Do not expose this
-router on a public deployment until then.
+Auth (§17): every endpoint requires the **analyst** role. The reviewer
+identity is taken from the authenticated session, never from the request
+body — otherwise anyone could stamp a human-verified provenance record with
+someone else's name.
 """
 
 from __future__ import annotations
@@ -28,7 +29,16 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/review", tags=["review"])
+from tenderza import audit
+from tenderza.auth import Principal, require_analyst
+
+router = APIRouter(
+    prefix="/review",
+    tags=["review"],
+    # Router-level: a new endpoint added here is protected by default rather
+    # than by the author remembering to add a decorator.
+    dependencies=[Depends(require_analyst)],
+)
 
 # Fields a reviewer may write through to the tenders table, and how to cast.
 _FIELD_COLUMNS: dict[str, str] = {
@@ -45,7 +55,9 @@ _FIELD_COLUMNS: dict[str, str] = {
 class ResolveRequest(BaseModel):
     action: Literal["approve", "correct", "reject"]
     corrected_value: Any | None = None
-    reviewer: str = "admin"
+    # NOTE: no `reviewer` field. Attribution comes from the session (§17);
+    # accepting it from the body would let a caller sign a human-verified
+    # provenance stamp as somebody else.
 
 
 def get_pool():
@@ -120,7 +132,10 @@ def review_stats(pool=Depends(get_pool)):
 
 
 @router.post("/{item_id}/resolve")
-def resolve_item(item_id: str, req: ResolveRequest, pool=Depends(get_pool)):
+def resolve_item(item_id: str, req: ResolveRequest,
+                 principal: Principal = Depends(require_analyst),
+                 pool=Depends(get_pool)):
+    reviewer = principal.email
     with pool.connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             try:
@@ -147,19 +162,36 @@ def resolve_item(item_id: str, req: ResolveRequest, pool=Depends(get_pool)):
                         422, "no value to apply (correct requires corrected_value)"
                     )
                 applied = _apply_value(
-                    cur, str(item["tender_id"]), item["field"], value, req.reviewer
+                    cur, str(item["tender_id"]), item["field"], value, reviewer
                 )
 
+            # reviewed_by is a real FK, so it can only hold a principal that
+            # has a users row. The service token and the auth-disabled dev
+            # principal are invented in code, so for those we keep the
+            # attribution in the resolution JSON and leave the FK null.
+            reviewed_by = None if principal.is_synthetic else principal.user_id
             cur.execute(
                 """
                 UPDATE review_queue
                 SET resolved_at = now(),
+                    reviewed_by = %s,
                     resolution = %s
                 WHERE id = %s
                 """,
-                (Jsonb({"action": req.action, "applied": applied,
-                        "reviewer": req.reviewer}), item_id),
+                (reviewed_by,
+                 Jsonb({"action": req.action, "applied": applied,
+                        "reviewer": reviewer}), item_id),
             )
+
+        # Same transaction as the change itself: the tender edit and the
+        # record of who made it commit together or not at all (§17).
+        audit.record_for_principal(
+            conn, principal, table_name="review_queue",
+            action=audit.REVIEW_RESOLVED, record_id=item_id,
+            detail={"decision": req.action, "applied": applied,
+                    "field": item["field"],
+                    "tender_id": str(item["tender_id"])},
+        )
         conn.commit()
 
     return {"resolved": item_id, "action": req.action, "applied": applied}
