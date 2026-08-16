@@ -165,3 +165,118 @@ class TestEndToEnd:
         counts = store.counts()
         assert counts["tenders"] >= 1
         assert counts["ocds_records"] >= 1
+
+
+class TestTimezoneRepairScript:
+    """scripts/fix_closing_timezones.py — the P0 backfill (§10.2.1).
+
+    Rows ingested before the fix hold instants two hours late. The repair
+    replays the verbatim ocds_records archive rather than re-crawling, and
+    must NOT log the correction as a buyer-driven SHORTENED change.
+    """
+
+    @staticmethod
+    def _script():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "fix_closing_timezones",
+            Path(__file__).parent.parent / "scripts" / "fix_closing_timezones.py",
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @staticmethod
+    def _seed_buggy_row(store, conn):
+        """Persist a real release, then rewind it to the pre-fix reading."""
+        release = json.loads(
+            (FIXTURES / "ocds_api" / "real_release_2026-08-14.json").read_text()
+        )["release"]
+        store.archive_ocds_release(release)
+        notice = release_to_notice(release, "etenders-ocds", "https://x/api")
+        result = store.upsert_tender(normalize_notice(notice, authority_score=100))
+        # Simulate the old adapter: the same wall clock, but read as UTC.
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tenders
+                SET closing_at  = closing_at  + interval '2 hours',
+                    briefing_at = briefing_at + interval '2 hours',
+                    field_provenance = field_provenance
+                        || '{"closing_at": {"source": "SOURCE",
+                              "source_id": "etenders-ocds", "confidence": 0.98}}'::jsonb
+                WHERE id = %s
+                """,
+                (result.tender_id,),
+            )
+        return release, result.tender_id
+
+    def test_dry_run_reports_but_writes_nothing(self, store, conn):
+        _, tender_id = self._seed_buggy_row(store, conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT closing_at FROM tenders WHERE id = %s", (tender_id,))
+            before = cur.fetchone()[0]
+
+        stats = self._script().repair(conn, apply=False, limit=None, verbose=False)
+        assert stats["repaired"] >= 1
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT closing_at FROM tenders WHERE id = %s", (tender_id,))
+            assert cur.fetchone()[0] == before  # untouched
+
+    def test_apply_moves_closing_two_hours_earlier(self, store, conn):
+        _, tender_id = self._seed_buggy_row(store, conn)
+        self._script().repair(conn, apply=True, limit=None, verbose=False)
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT closing_at, briefing_at FROM tenders WHERE id = %s",
+                (tender_id,),
+            )
+            closing, briefing = cur.fetchone()
+        # Fixture publishes 11:00Z; the truth is 11:00 SAST == 09:00 UTC.
+        assert closing == datetime(2026, 9, 16, 11, 0, tzinfo=SAST)
+        assert closing.astimezone(SAST).hour == 11
+        assert briefing == datetime(2026, 8, 25, 11, 0, tzinfo=SAST)
+
+    def test_correction_is_not_logged_as_a_deadline_change(self, store, conn):
+        _, tender_id = self._seed_buggy_row(store, conn)
+        self._script().repair(conn, apply=True, limit=None, verbose=False)
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT change_kind FROM tender_versions WHERE tender_id = %s "
+                "ORDER BY version_no",
+                (tender_id,),
+            )
+            kinds = [r[0] for r in cur.fetchall()]
+        assert "SHORTENED" not in kinds  # never blame the buyer for our bug
+        assert kinds[-1] == "TIMEZONE_CORRECTION"
+
+    def test_repair_stamps_derived_provenance_with_a_note(self, store, conn):
+        _, tender_id = self._seed_buggy_row(store, conn)
+        self._script().repair(conn, apply=True, limit=None, verbose=False)
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT field_provenance FROM tenders WHERE id = %s", (tender_id,)
+            )
+            prov = cur.fetchone()[0]
+        assert prov["closing_at"]["source"] == "DERIVED"
+        assert "SAST" in prov["closing_at"]["note"]
+
+    def test_second_run_is_a_noop(self, store, conn):
+        _, tender_id = self._seed_buggy_row(store, conn)
+        script = self._script()
+        script.repair(conn, apply=True, limit=None, verbose=False)
+        stats = script.repair(conn, apply=True, limit=None, verbose=False)
+        assert stats["repaired"] == 0
+        assert stats["unchanged"] >= 1
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM tender_versions "
+                "WHERE tender_id = %s AND change_kind = 'TIMEZONE_CORRECTION'",
+                (tender_id,),
+            )
+            assert cur.fetchone()[0] == 1  # no duplicate version rows

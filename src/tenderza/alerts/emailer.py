@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import os
 import smtplib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
 from tenderza.alerts.matcher import closing_verified
-
-SAST = timezone(timedelta(hours=2))
+from tenderza.timeutil import SAST
 
 
 def _fmt_dt(dt: datetime | None) -> str:

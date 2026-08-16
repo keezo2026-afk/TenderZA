@@ -102,6 +102,22 @@ class TestShapeTenderRow:
         out = shape_tender_row(self._row(field_provenance={}))
         assert out["dates"]["closing_verified"] is False
 
+    def test_derived_correction_is_disclosed_but_still_verified(self):
+        """§10.2.5: a repaired closing time stays trustworthy AND explains itself."""
+        row = self._row(field_provenance={"closing_at": {
+            "source": "DERIVED", "source_id": "etenders-ocds", "confidence": 0.98,
+            "note": "eTenders publishes SAST wall-clock times with a 'Z' suffix",
+        }})
+        out = shape_tender_row(row)["dates"]
+        assert out["closing_verified"] is True
+        assert out["closing_source"] == "DERIVED"
+        assert "SAST" in out["closing_note"]
+
+    def test_plain_source_dates_carry_no_note(self):
+        out = shape_tender_row(self._row())["dates"]
+        assert out["closing_source"] == "SOURCE"
+        assert out["closing_note"] is None
+
     def test_attribution_always_present(self):
         out = shape_tender_row(self._row())
         assert out["original_url"]

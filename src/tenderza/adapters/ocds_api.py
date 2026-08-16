@@ -19,14 +19,30 @@ Phase 0 verification — DONE (14 Aug 2026, live against the API):
 * Licensing note: the portal's download page says CC BY 4.0; the API's
   release packages declare an Open Data Commons PDDL URL. Either way the
   data is open — attribution retained via source_url (§2.4).
-* KNOWN DATA-QUALITY ISSUE (P0 follow-up): tenderPeriod.endDate values
-  arrive as e.g. "2026-09-16T11:00:00Z", but SA tenders close at 11:00
-  SAST by SCM convention — the portal almost certainly emits SAST wall
-  times mislabeled as UTC (briefing dates show the same pattern; empty
-  briefings are "0001-01-01T00:00:00Z"). Verify against the portal UI for
-  a sample, then decide whether to re-interpret Z as SAST here. Until
-  resolved we store what the source says (provenance = SOURCE) rather
-  than silently rewriting it.
+* RESOLVED DATA-QUALITY ISSUE — the "Z" defect (P0, closed 16 Aug 2026):
+  the portal serializes **SAST wall-clock times with a literal Z suffix**.
+  ``"2026-09-16T11:00:00Z"`` means 11:00 SAST (= 09:00 UTC), not 11:00 UTC.
+  Evidence gathered before changing behaviour:
+    1. Every observed time-of-day is an SA business boundary — closings at
+       10:00/11:00/12:00, briefings at 09:30/10:30/11:00. Read as true UTC
+       they would be 12:00/13:00/14:00 SAST, which no SCM office uses.
+    2. Empty briefing sessions serialize as "0001-01-01T00:00:00Z" —
+       .NET ``DateTime.MinValue`` with a Z glued on. Converting an
+       unspecified-kind DateTime to UTC cannot yield that; string
+       concatenation can. The publisher appends Z, it does not convert.
+    3. Per-tender cross-checks against the buyers' own adverts match the
+       API digits exactly (CoCT 43G/2026/27 closes 10:00, Theewaterskloof
+       DEV 05/2026/27 12:00, KZN Public Works ZNTM01266W 11:00), and
+       National Treasury's own advert pages write "11h00 (SAST)".
+    4. The portal itself flags the dataset as "public beta ... not
+       guaranteed to be accurate in all instances"
+       (https://data.etenders.gov.za/Home/LearnMore).
+  We therefore reinterpret Z-suffixed instants as SAST (see
+  ``tenderza.timeutil``) and mark the affected fields **DERIVED** in
+  provenance with the reason attached — the correction is disclosed in the
+  API/UI, never silent (§10.2.5). Raw releases are still archived verbatim
+  in ocds_records, so the original strings are always recoverable.
+  ``0001-01-01`` sentinels map to None rather than to year-1 instants.
 
 Options (SourceConfig.options):
 
@@ -59,18 +75,25 @@ from tenderza.adapters.base import (
     RawTenderNotice,
     register_adapter,
 )
+from tenderza.timeutil import parse_wall_time_as_sast
 
 DEFAULT_BASE_URL = "https://ocds-api.etenders.gov.za"
 DEFAULT_RELEASES_PATH = "/api/OCDSReleases"
 
+#: Provenance note attached to every instant we re-zone (§10.2.5).
+Z_DEFECT_NOTE = (
+    "eTenders publishes SAST wall-clock times with a 'Z' suffix; "
+    "re-interpreted as SAST (+02:00)"
+)
 
-def _parse_dt(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+
+def _parse_dt(value: str | None) -> tuple[datetime | None, bool]:
+    """Parse an eTenders timestamp. Returns (instant, was_corrected).
+
+    See the module docstring: a ``Z`` on this portal means SAST, not UTC,
+    and ``0001-01-01`` is a null sentinel.
+    """
+    return parse_wall_time_as_sast(value)
 
 
 def release_to_notice(release: dict[str, Any], source_id: str, source_url: str) -> RawTenderNotice:
@@ -91,12 +114,29 @@ def release_to_notice(release: dict[str, Any], source_id: str, source_url: str) 
         if doc.get("url")
     ]
 
+    # Timestamps: the portal's "Z" means SAST (see module docstring). Every
+    # correction is recorded so the Normalizer can mark the field DERIVED.
+    derived: dict[str, str] = {}
+
+    closing_at, closing_fixed = _parse_dt(period.get("endDate"))
+    if closing_fixed:
+        derived["closing_at"] = Z_DEFECT_NOTE
+
+    # release.date is a date-only field (always T00:00:00Z) — the day is the
+    # only meaningful part, so re-zoning it is harmless and keeps "published
+    # on" consistent with the SA calendar day the portal meant.
+    published_at, published_fixed = _parse_dt(release.get("date"))
+    if published_fixed:
+        derived["published_at"] = Z_DEFECT_NOTE
+
     # eTenders extension: briefingSession {isSession, compulsory, date, venue}
     compulsory_briefing: bool | None = None
     briefing_at = None
     if briefing.get("isSession"):
         compulsory_briefing = bool(briefing.get("compulsory"))
-        briefing_at = _parse_dt(briefing.get("date"))
+        briefing_at, briefing_fixed = _parse_dt(briefing.get("date"))
+        if briefing_fixed:
+            derived["briefing_at"] = Z_DEFECT_NOTE
 
     # eTenders publishes the human bid number in tender.title (e.g.
     # "ZNTM01266W") and a numeric portal id in tender.id — prefer the title
@@ -115,12 +155,13 @@ def release_to_notice(release: dict[str, Any], source_id: str, source_url: str) 
         description=tender.get("description"),
         province=tender.get("province") or None,   # eTenders extension
         categories=categories,
-        published_at=_parse_dt(release.get("date")),
-        closing_at=_parse_dt(period.get("endDate")),
+        published_at=published_at,
+        closing_at=closing_at,
         briefing_at=briefing_at,
         compulsory_briefing=compulsory_briefing,
         documents=documents,
         raw=release,  # archived verbatim into ocds_records
+        derived_fields=derived,
     )
 
 

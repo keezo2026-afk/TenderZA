@@ -5,6 +5,10 @@ export interface TenderDates {
   closing_at: string | null;
   closing_verified: boolean;
   verify_at_source: string | null;
+  /** SOURCE | DERIVED | INFERRED — present when not a verbatim source value. */
+  closing_source?: string | null;
+  /** Why the stored time differs from the published bytes (§10.2.5). */
+  closing_note?: string | null;
   briefing_at: string | null;
   compulsory_briefing: boolean | null;
 }

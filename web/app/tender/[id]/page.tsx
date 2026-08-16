@@ -100,6 +100,11 @@ export default function TenderPage({
                 Unverified — verify at source
               </a>
             )}
+            {d.closing_verified && d.closing_note && (
+              <p className="mt-1 text-xs text-slate-500">
+                Adjusted: {d.closing_note}
+              </p>
+            )}
           </div>
           <div
             className={`rounded-md p-3 ${

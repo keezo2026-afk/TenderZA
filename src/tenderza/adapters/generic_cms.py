@@ -15,7 +15,7 @@ during discovery mode; this adapter trusts it and probes gently otherwise.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import timezone
 from typing import Any
 
 import httpx
@@ -27,18 +27,18 @@ from tenderza.adapters.base import (
     register_adapter,
 )
 from tenderza.adapters.generic_sitemap_rss import parse_feed
+from tenderza.timeutil import ensure_tz, parse_iso
 
 
 def wp_post_to_notice(post: dict[str, Any], source_id: str) -> RawTenderNotice:
     """Map a WordPress REST API post object to a notice (pure)."""
     title = (post.get("title") or {}).get("rendered", "").strip()
-    published = post.get("date_gmt") or post.get("date")
-    published_at = None
-    if published:
-        try:
-            published_at = datetime.fromisoformat(published.replace("Z", "+00:00"))
-        except ValueError:
-            published_at = None
+    # WordPress: date_gmt is genuinely UTC (the field contract says so);
+    # the bare `date` field is site-local, which for SA sources is SAST.
+    published = post.get("date_gmt")
+    published_at = ensure_tz(parse_iso(published), assume=timezone.utc)
+    if published_at is None:
+        published_at = ensure_tz(parse_iso(post.get("date")))
     return RawTenderNotice(
         source_id=source_id,
         source_url=post.get("link", ""),

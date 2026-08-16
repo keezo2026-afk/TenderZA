@@ -31,6 +31,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Review-queue admin: API (approve/correct/reject w/ human provenance + versioning) and UI at `/review` | §6 human-in-the-loop | [`src/tenderza/api/review.py`](src/tenderza/api/review.py), [`web/app/review/`](web/app/review/) |
 | Email alerts v1: saved searches, batched digests, at-most-once, verified-dates-only deadlines; UI at `/alerts` | §14 (P2 MLP) | [`src/tenderza/alerts/`](src/tenderza/alerts/), [`scripts/run_alerts.py`](scripts/run_alerts.py) |
 | Source-health dashboard + alerting: SLA/MTTD/MTTR classification, `/ops/*` API, `/ops` UI, cron pager | §15, §16 (P2 MLP) | [`src/tenderza/health/`](src/tenderza/health/), [`web/app/ops/`](web/app/ops/), [`scripts/check_source_health.py`](scripts/check_source_health.py) |
+| Timezone doctrine + P0 closing-time correction (SAST-labelled-as-`Z` defect) w/ idempotent backfill | §10.2.1 | [`src/tenderza/timeutil.py`](src/tenderza/timeutil.py), [`scripts/fix_closing_timezones.py`](scripts/fix_closing_timezones.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
 | CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 
@@ -223,3 +224,45 @@ with an empty list when all is well and is safe for an external monitor to poll.
 - [ ] Verify/repair the seeded `tender_url`s during discovery mode (§5.2) — several
       provincial/metro URLs are best-effort placeholders flagged `DISCOVERY`.
 - [ ] Business model sign-off (§2.3) and PPA-watch task setup (§17.3).
+
+### Closing-time timezone correctness (§10.2.1, P0)
+
+**A wrong deadline is worse than no deadline.** The eTenders OCDS API stamps
+its timestamps with a `Z` suffix, but the digits are South African wall-clock
+time, not UTC. Read literally, every closing time in the system was **two
+hours late** — a user trusting an 11:00 SAST close would see 13:00 and arrive
+to a sealed bid box.
+
+Evidence that `Z` is a publisher defect, not a real UTC offset:
+
+1. Every observed time-of-day is an SA business boundary — 10:00 / 11:00 /
+   12:00 closes, 09:30 / 11:00 briefings — which UTC times would not cluster on.
+2. Empty briefing sessions serialise as `0001-01-01T00:00:00Z`: .NET's
+   `DateTime.MinValue` with a literal `Z` appended, proving the zone is a
+   string suffix rather than a converted instant.
+3. Per-tender adverts published by the buyers match the `Z` digits exactly.
+4. National Treasury writes its own deadlines as "11h00 (SAST)".
+
+[`src/tenderza/timeutil.py`](src/tenderza/timeutil.py) holds the single
+timezone doctrine for the codebase: re-localise eTenders wall times to SAST
+(UTC+2, no DST), map the `0001-01-01` sentinel to `NULL`, trust *declared*
+offsets from RSS/Atom and WordPress `date_gmt`, and assume SAST for anything
+naive from an SA source. A repaired field is stamped `DERIVED` with a note
+explaining the adjustment; the note rides in the existing `field_provenance`
+JSONB (no schema change) and surfaces on the tender page. A timezone repair
+does **not** lower confidence — the corrected time is more trustworthy than
+the published one — so repaired closings stay alertable.
+
+Rows ingested before the fix are repaired from the verbatim `ocds_records`
+archive rather than re-crawled:
+
+```bash
+DATABASE_URL=... python scripts/fix_closing_timezones.py --dry-run   # report only
+DATABASE_URL=... python scripts/fix_closing_timezones.py --apply     # write
+```
+
+Re-running `scripts/ingest_ocds.py` would also fix the dates, but the upsert
+diff would classify the two-hour move as `SHORTENED` and tell users the buyer
+brought the deadline forward. The repair script writes a truthful
+`TIMEZONE_CORRECTION` version instead, touches only the date columns, and is
+idempotent — a second run reports `repaired: 0` and logs nothing.

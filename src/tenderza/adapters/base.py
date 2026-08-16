@@ -76,6 +76,11 @@ class RawTenderNotice:
     compulsory_briefing: bool | None = None
     documents: list[DocumentRef] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)  # verbatim source payload
+    # Fields the adapter had to repair because the publisher's own data was
+    # wrong (e.g. eTenders stamping SAST wall times with a "Z"). Maps field
+    # name -> human-readable reason; the Normalizer turns these into DERIVED
+    # provenance so the correction is disclosed, never silent (§10.2.5).
+    derived_fields: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

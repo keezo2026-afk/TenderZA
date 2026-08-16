@@ -29,6 +29,7 @@ from tenderza.adapters.base import (
     RawTenderNotice,
     register_adapter,
 )
+from tenderza.timeutil import ensure_tz, is_sentinel, parse_iso
 
 _NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -37,16 +38,23 @@ _NS = {
 
 
 def _parse_feed_datetime(value: str | None) -> datetime | None:
+    """Parse an RSS/Atom timestamp.
+
+    Unlike the eTenders OCDS API (see tenderza.timeutil), feed generators
+    emit real offsets, so a declared UTC zone is taken at face value here.
+    Naive values default to SAST, our house rule for SA sources (§10.2.1).
+    """
     if not value:
         return None
     try:  # RFC 822 (RSS)
-        return parsedate_to_datetime(value)
+        parsed = parsedate_to_datetime(value)
     except (TypeError, ValueError):
-        pass
-    try:  # ISO 8601 (Atom)
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        parsed = None
+    if parsed is None:  # ISO 8601 (Atom)
+        parsed = parse_iso(value)
+    if parsed is None or is_sentinel(parsed):
         return None
+    return ensure_tz(parsed)
 
 
 def parse_feed(xml_text: str, source_id: str, feed_url: str) -> list[RawTenderNotice]:

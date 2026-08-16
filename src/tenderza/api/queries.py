@@ -128,6 +128,12 @@ def shape_tender_row(row: dict[str, Any]) -> dict[str, Any]:
     provenance = row.get("field_provenance") or {}
     closing_prov = provenance.get("closing_at") or {}
     closing_verified = (closing_prov.get("confidence") or 0.0) >= 0.80
+    # §10.2.5: when we repaired a publisher's value (e.g. eTenders stamping
+    # SAST wall times with a "Z"), say so next to the date rather than
+    # presenting the corrected instant as if it came straight from source.
+    closing_note = closing_prov.get("note") if closing_prov.get("source") in (
+        "DERIVED", "INFERRED"
+    ) else None
 
     return {
         "id": str(row["id"]),
@@ -141,6 +147,8 @@ def shape_tender_row(row: dict[str, Any]) -> dict[str, Any]:
             "published_at": _iso(row["published_at"]),
             "closing_at": _iso(row["closing_at"]),
             "closing_verified": closing_verified,
+            "closing_source": closing_prov.get("source"),
+            "closing_note": closing_note,
             "verify_at_source": None if closing_verified else row["original_url"],
             "briefing_at": _iso(row["briefing_at"]),
             "compulsory_briefing": row["compulsory_briefing"],

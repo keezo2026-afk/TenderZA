@@ -3,10 +3,13 @@
 Responsibilities:
 * canonicalize the tender number (§7);
 * attach per-field provenance + confidence (§10.2.5) — SOURCE for fields
-  parsed from structured data, INFERRED for guesses (e.g. SCM-convention
-  closing time);
-* apply the SCM closing-time convention: a closing DATE with no time is
-  stored as 11:00 SAST and flagged INFERRED (§10.2.1);
+  parsed from structured data, DERIVED when the adapter had to repair
+  broken publisher data (``RawTenderNotice.derived_fields``, e.g. the
+  eTenders "SAST stamped as Z" defect), INFERRED for guesses (e.g. the
+  SCM-convention closing time). DERIVED values carry a ``note`` saying
+  what was changed and why — corrections are disclosed, never silent;
+* apply the SCM closing-time convention: a closing DATE with no time (i.e.
+  midnight SAST) is stored as 11:00 SAST and flagged INFERRED (§10.2.1);
 * route high-stakes low-confidence fields to the review queue (§6).
 
 The normalizer is pure: no I/O, no DB. Persistence happens downstream.
@@ -15,13 +18,23 @@ The normalizer is pure: no I/O, no DB. Persistence happens downstream.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time
 from typing import Any
 
 from tenderza.adapters.base import RawTenderNotice
 from tenderza.normalize import normalize_tender_number
+from tenderza.timeutil import SAST, ensure_tz, looks_date_only
 
-SAST = timezone(timedelta(hours=2))
+__all__ = [
+    "SAST",
+    "SCM_DEFAULT_CLOSING",
+    "REVIEW_THRESHOLD",
+    "HIGH_STAKES_FIELDS",
+    "Provenance",
+    "CanonicalTender",
+    "normalize_notice",
+]
+
 SCM_DEFAULT_CLOSING = time(11, 0)  # 11:00 SAST convention (§10.2.1)
 
 # Confidence thresholds (§6): below this, high-stakes fields go to review.
@@ -34,13 +47,17 @@ class Provenance:
     source: str          # SOURCE | DERIVED | INFERRED
     source_id: str
     confidence: float
+    note: str | None = None   # why a DERIVED/INFERRED value differs from raw
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "source": self.source,
             "source_id": self.source_id,
             "confidence": self.confidence,
         }
+        if self.note:
+            out["note"] = self.note
+        return out
 
 
 @dataclass
@@ -81,11 +98,7 @@ class CanonicalTender:
 
 def _ensure_tz(dt: datetime | None) -> datetime | None:
     """Never store naive datetimes (§10.2.1). Naive input is assumed SAST."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=SAST)
-    return dt
+    return ensure_tz(dt)
 
 
 def normalize_notice(
@@ -103,6 +116,18 @@ def normalize_notice(
     src = notice.source_id
     base_conf = 0.98 if structured else 0.70
     kind = "SOURCE"
+    # Adapter-level repairs of bad publisher data (e.g. the eTenders "Z"
+    # defect) are DERIVED, not SOURCE — the value no longer matches the
+    # bytes we were given, so we say so and carry the reason (§10.2.5).
+    repaired = notice.derived_fields or {}
+
+    def _prov(field_name: str, *, confidence: float | None = None,
+              kind_override: str | None = None) -> dict[str, Any]:
+        note = repaired.get(field_name)
+        source_kind = kind_override or ("DERIVED" if note else kind)
+        return Provenance(
+            source_kind, src, base_conf if confidence is None else confidence, note
+        ).as_dict()
 
     tender = CanonicalTender(
         title=notice.title.strip(),
@@ -125,29 +150,35 @@ def normalize_notice(
 
     prov = tender.field_provenance
     if notice.title:
-        prov["title"] = Provenance(kind, src, base_conf).as_dict()
+        prov["title"] = _prov("title")
     if notice.tender_number:
-        prov["tender_number"] = Provenance(kind, src, base_conf).as_dict()
+        prov["tender_number"] = _prov("tender_number")
     if notice.buyer_name:
-        prov["buyer_name"] = Provenance(kind, src, base_conf).as_dict()
+        prov["buyer_name"] = _prov("buyer_name")
     if notice.published_at:
-        prov["published_at"] = Provenance(kind, src, base_conf).as_dict()
+        prov["published_at"] = _prov("published_at")
     if notice.compulsory_briefing is not None:
-        prov["compulsory_briefing"] = Provenance(kind, src, base_conf).as_dict()
+        prov["compulsory_briefing"] = _prov("compulsory_briefing")
     if notice.briefing_at:
-        prov["briefing_at"] = Provenance(kind, src, base_conf).as_dict()
+        prov["briefing_at"] = _prov("briefing_at")
 
     # Closing date + SCM convention (§10.2.1)
     closing = _ensure_tz(notice.closing_at)
     if closing is not None:
-        if closing.timetz().replace(tzinfo=None) == time(0, 0):
+        if looks_date_only(closing):
             # Date-only closing: apply 11:00 SAST convention, flag INFERRED.
             closing = closing.astimezone(SAST).replace(
                 hour=SCM_DEFAULT_CLOSING.hour, minute=SCM_DEFAULT_CLOSING.minute
             )
-            prov["closing_at"] = Provenance("INFERRED", src, 0.75).as_dict()
+            prov["closing_at"] = Provenance(
+                "INFERRED", src, 0.75,
+                "closing date published without a time; SCM 11:00 SAST convention",
+            ).as_dict()
         else:
-            prov["closing_at"] = Provenance(kind, src, base_conf).as_dict()
+            # A timezone repair does NOT lower confidence: it is a
+            # deterministic, evidenced correction that makes the instant
+            # MORE accurate, so the date stays "verified" for alerting.
+            prov["closing_at"] = _prov("closing_at")
         tender.closing_at = closing
 
     # Review-queue routing (§6): high-stakes fields below threshold.

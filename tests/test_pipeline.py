@@ -56,6 +56,60 @@ class TestNormalizer:
         assert t.closing_at.tzinfo is not None
         assert t.closing_at.utcoffset() == timedelta(hours=2)
 
+    def test_utc_midnight_closing_also_hits_the_scm_convention(self):
+        """Midnight in ANY zone means "no time published" (§10.2.1)."""
+        from datetime import timezone as _tz
+        t = normalize_notice(
+            _notice(closing_at=datetime(2026, 9, 15, 0, 0, tzinfo=_tz.utc))
+        )
+        assert t.closing_at.astimezone(SAST).hour == 11
+        assert t.field_provenance["closing_at"]["source"] == "INFERRED"
+
+
+class TestDerivedProvenance:
+    """Adapter-level repairs of bad publisher data must be disclosed (§10.2.5)."""
+
+    def _repaired(self, **fields):
+        return normalize_notice(_notice(derived_fields=fields))
+
+    def test_repaired_field_is_derived_not_source(self):
+        t = self._repaired(closing_at="re-interpreted as SAST (+02:00)")
+        assert t.field_provenance["closing_at"]["source"] == "DERIVED"
+
+    def test_repair_note_is_carried_for_the_ui(self):
+        t = self._repaired(closing_at="re-interpreted as SAST (+02:00)")
+        assert "SAST" in t.field_provenance["closing_at"]["note"]
+
+    def test_repair_does_not_lower_confidence_or_trigger_review(self):
+        """A deterministic, evidenced correction is MORE accurate, not less —
+        it must not demote the date to "verify at source" (§10.3)."""
+        t = self._repaired(closing_at="re-interpreted as SAST (+02:00)")
+        assert t.confidence_for("closing_at") >= 0.80
+        assert t.review_items == []
+
+    def test_untouched_fields_stay_source(self):
+        t = self._repaired(closing_at="tz repair")
+        assert t.field_provenance["title"]["source"] == "SOURCE"
+        assert "note" not in t.field_provenance["title"]
+
+    def test_inferred_beats_derived_when_no_time_was_published(self):
+        """A date-only closing is a GUESS even if we also re-zoned it."""
+        t = normalize_notice(_notice(
+            closing_at=datetime(2026, 9, 15, 0, 0, tzinfo=SAST),
+            derived_fields={"closing_at": "tz repair"},
+        ))
+        assert t.field_provenance["closing_at"]["source"] == "INFERRED"
+        assert t.confidence_for("closing_at") == 0.75
+
+    def test_briefing_repair_recorded(self):
+        t = normalize_notice(_notice(
+            briefing_at=datetime(2026, 8, 25, 10, 30, tzinfo=SAST),
+            compulsory_briefing=True,
+            derived_fields={"briefing_at": "tz repair"},
+        ))
+        assert t.field_provenance["briefing_at"]["source"] == "DERIVED"
+        assert t.field_provenance["compulsory_briefing"]["source"] == "SOURCE"
+
 
 class TestEntityResolution:
     def test_aliases_collapse(self):
@@ -181,6 +235,10 @@ class TestEndToEnd:
         assert tender.normalized_tender_number == "zntm1266w"
         assert tender.compulsory_briefing is True
         assert tender.confidence_for("closing_at") >= 0.9
+        # P0 timezone fix: the portal said "11:00Z", which means 11:00 SAST.
+        assert tender.closing_at == datetime(2026, 9, 16, 9, 0, tzinfo=UTC)
+        assert tender.closing_at.astimezone(SAST).hour == 11
+        assert tender.field_provenance["closing_at"]["source"] == "DERIVED"
 
         now = datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
         assert compute_status(tender, now=now) == "OPEN"

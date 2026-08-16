@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time
 
-SAST = timezone(timedelta(hours=2))
+from tenderza.timeutil import SAST
+
 SCM_DEFAULT_CLOSING = time(11, 0)
 
 
