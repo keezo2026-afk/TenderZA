@@ -70,12 +70,76 @@ DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza \
 
 ### Zero-setup demo (no Docker needed)
 
+**Requirements:** Python **3.10–3.12** (see note below) and Node **20.9+**.
+
+<details>
+<summary><strong>macOS / Linux</strong></summary>
+
 ```bash
+git clone https://github.com/keezo2026-afk/TenderZA.git && cd TenderZA
+
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python scripts/dev_demo.py            # embedded Postgres + schema + seed
+
+python scripts/dev_demo.py --days 7   # embedded Postgres + schema + seed
                                       # + live OCDS pull (or bundled real
                                       # sample data offline) + API on :8000
 ```
+
+In a **second terminal**, start the web UI:
+
+```bash
+cd web && npm install
+API_URL=http://127.0.0.1:8000 npm run dev
+```
+</details>
+
+<details>
+<summary><strong>Windows (PowerShell)</strong></summary>
+
+```powershell
+git clone https://github.com/keezo2026-afk/TenderZA.git; cd TenderZA
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+
+python scripts\dev_demo.py --days 7
+```
+
+In a **second** PowerShell window:
+
+```powershell
+cd web; npm install
+$env:API_URL="http://127.0.0.1:8000"; npm run dev
+```
+
+If activation is blocked, allow scripts for the current session only:
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
+</details>
+
+Then open **<http://localhost:3000>**. The API is on **:8000** (`/docs` for the
+OpenAPI UI). The demo prints an admin account — `admin@tenderza.example` /
+`tenderza-demo-admin` — which is what gets you into the role-gated `/review`
+(analyst) and `/ops` (admin) pages.
+
+> **Python 3.13+ will not work for this script.** The embedded database
+> ([`pgserver`](https://pypi.org/project/pgserver/)) ships prebuilt PostgreSQL
+> binaries as wheels for CPython 3.9–3.12 only, and publishes no source
+> distribution — so on 3.13 `pip install` fails to resolve rather than
+> building. Create the venv with 3.12, or use the Docker path above instead.
+> `dev_demo.py` checks this up front and tells you which option to take.
+
+**No network?** The live eTender pull is attempted first; if it fails the demo
+automatically falls back to the bundled real OCDS sample in `data/samples/`,
+so you still get a populated UI. Force it with `--skip-ingest` to start empty.
+
+**Ports in use?** `python scripts/dev_demo.py --port 8001` (then pass the same
+value in `API_URL`), and `npm run dev -- -p 3001` for the UI.
+
+**Starting over:** the database lives in a `tenderza-pgdata` folder inside your
+system temp directory. Delete it for a clean slate, or point somewhere durable
+with `--pgdata ./pgdata` so it survives a reboot.
 
 Then: `GET /tenders?q=cctv`, `GET /tenders?province=Western+Cape&status=OPEN`,
 `GET /tenders?compulsory_briefing=true&closing_within_days=30`,
@@ -100,6 +164,28 @@ Frontend unit tests (no extra dependencies — Node's built-in runner):
 ```bash
 cd web && npm test
 ```
+
+### Running the tests locally
+
+```bash
+pytest                 # backend: unit tests (integration tests auto-skip)
+ruff check .           # lint — CI fails on this too
+cd web && npm test     # frontend: 17 tests, Node's built-in runner
+```
+
+`pytest` alone runs green with no database: every test needing Postgres is
+gated on `TEST_DATABASE_URL` and reports as skipped. To actually exercise
+those (search ranking, store upserts, scheduler, review queue, alerts, auth
+sessions, audit trail), point them at a real Postgres:
+
+```bash
+# reuse the demo's embedded server, or bring up Docker (infra/docker-compose.yml)
+TEST_DATABASE_URL=postgresql://tenderza:tenderza@localhost:5432/tenderza pytest
+```
+
+The integration tests need the **pgvector** extension, which is why the Docker
+image is `pgvector/pgvector:pg16` and not stock `postgres` — a plain server
+fails at `CREATE EXTENSION vector` when applying `db/schema.sql`.
 
 ### Search & indexing (§12)
 

@@ -17,16 +17,47 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# pgserver ships prebuilt PostgreSQL binaries and publishes wheels only for
+# cp39-cp312. On a newer interpreter `pip install` finds no wheel and there is
+# no sdist to fall back to, so the failure surfaces as a confusing resolver
+# error at install time rather than here. Say so plainly instead.
+PGSERVER_MAX_MINOR = 12
+
+
+def _check_python() -> None:
+    if sys.version_info[:2] > (3, PGSERVER_MAX_MINOR):
+        v = ".".join(str(p) for p in sys.version_info[:3])
+        sys.exit(
+            f"[demo] Python {v} is too new for the zero-setup demo.\n"
+            f"       pgserver (embedded PostgreSQL) publishes wheels only up to\n"
+            f"       Python 3.{PGSERVER_MAX_MINOR}, and has no source distribution.\n\n"
+            f"       Either create the venv with an older interpreter:\n"
+            f"           py -3.12 -m venv .venv        (Windows)\n"
+            f"           python3.12 -m venv .venv      (macOS/Linux)\n\n"
+            f"       ...or run your own PostgreSQL and skip this script:\n"
+            f"           docker compose -f infra/docker-compose.yml up -d\n"
+            f"           psql <url> -f db/schema.sql\n"
+            f"           DATABASE_URL=<url> python scripts/seed_registry.py\n"
+            f"           DATABASE_URL=<url> uvicorn tenderza.api.app:app --port 8000"
+        )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=3, help="OCDS lookback window")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--pgdata", default="/tmp/tenderza-pgdata")
+    parser.add_argument(
+        # Not a hardcoded "/tmp/...": that is not a writable path on Windows,
+        # where the demo would fail before printing anything useful.
+        "--pgdata",
+        default=str(Path(tempfile.gettempdir()) / "tenderza-pgdata"),
+        help="embedded Postgres data directory (default: system temp dir)",
+    )
     parser.add_argument("--skip-ingest", action="store_true")
     parser.add_argument(
         # NOT a .local address: RFC 6762 reserves it, and the API's EmailStr
@@ -40,6 +71,8 @@ def main() -> int:
         help="password for the demo admin (dev only — never reuse in prod)",
     )
     args = parser.parse_args()
+
+    _check_python()
 
     import pgserver
 
