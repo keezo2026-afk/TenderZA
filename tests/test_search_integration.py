@@ -7,9 +7,15 @@ escapes, and that ranking actually orders rows the way the weights claim.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from tests.conftest import DSN
+# Read the env var directly rather than importing from tests.conftest: pytest
+# puts rootdir-relative test *directories* on sys.path (there is no
+# tests/__init__.py), so `tests` is not an importable package and the import
+# fails at collection time -- taking the whole suite down with it.
+DSN = os.environ.get("TEST_DATABASE_URL")
 
 pytestmark = pytest.mark.skipif(not DSN, reason="TEST_DATABASE_URL not set")
 
