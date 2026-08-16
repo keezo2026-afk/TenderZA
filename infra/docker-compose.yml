@@ -1,0 +1,41 @@
+# TenderZA local development stack (Blueprint §18)
+# Usage: docker compose -f infra/docker-compose.yml up -d
+# Then:  psql postgresql://tenderza:tenderza@localhost:5432/tenderza -f db/schema.sql
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: tenderza
+      POSTGRES_PASSWORD: tenderza
+      POSTGRES_DB: tenderza
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tenderza"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: tenderza
+      MINIO_ROOT_PASSWORD: tenderza-dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+volumes:
+  pgdata:
+  miniodata:

@@ -1,0 +1,30 @@
+{
+  "ocid": "ocds-9t54cf-0045-2026",
+  "id": "release-0045-2026-tender",
+  "date": "2026-08-01T08:00:00+02:00",
+  "tag": ["tender"],
+  "initiationType": "tender",
+  "buyer": {
+    "id": "ZA-ORG-ETH",
+    "name": "eThekwini Metropolitan Municipality"
+  },
+  "tender": {
+    "id": "99045",
+    "title": "SCM 045/2026",
+    "description": "Supply and Installation of CCTV System",
+    "status": "active",
+    "tenderPeriod": {
+      "startDate": "2026-08-01T08:00:00+02:00",
+      "endDate": "2026-09-15T11:00:00+02:00"
+    },
+    "documents": [
+      {
+        "id": "doc-1",
+        "documentType": "biddingDocuments",
+        "title": "CCTV-Documents.pdf",
+        "url": "https://durban.gov.za/tenders/CCTV-Documents.pdf",
+        "format": "application/pdf"
+      }
+    ]
+  }
+}

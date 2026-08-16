@@ -1,0 +1,29 @@
+{
+  "_comment": "Golden fixture corpus for tender-number normalization (Blueprint 7). Each case: {raw, expected}. Groups of raws mapping to the same expected value assert dedupe equivalence. Extend with real-world formats as encountered — never change expected values without review.",
+  "cases": [
+    { "raw": "SCM 045/2026", "expected": "scm452026" },
+    { "raw": "SCM45/2026", "expected": "scm452026" },
+    { "raw": "scm-045-2026", "expected": "scm452026" },
+    { "raw": "SCM/045/2026", "expected": "scm452026" },
+
+    { "raw": "1H-13541", "expected": "1h13541" },
+    { "raw": "1H 13541", "expected": "1h13541" },
+
+    { "raw": "RFQ: 2026/07/0012", "expected": "rfq2026712" },
+    { "raw": "RFQ 2026/7/12", "expected": "rfq2026712" },
+
+    { "raw": "ETH-2026-0456", "expected": "eth2026456" },
+    { "raw": "eth 2026 456", "expected": "eth2026456" },
+
+    { "raw": "Bid No. B2026/45", "expected": "bidnob202645" },
+    { "raw": "BID NO B2026/45", "expected": "bidnob202645" },
+
+    { "raw": "  WCG/TR 019/26  ", "expected": "wcgtr1926" },
+    { "raw": "WCG-TR-19/26", "expected": "wcgtr1926" },
+
+    { "raw": "N.002-026-2025", "expected": "n2262025" },
+
+    { "raw": "", "expected": "" },
+    { "raw": null, "expected": "" }
+  ]
+}
