@@ -9,6 +9,14 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 
 ## Status: Phase 0/1 skeleton
 
+> **Read this before the table below.** The table maps blueprint components to
+> the files that implement them — it is *not* a claim that the platform is
+> operating at scale. Measured on 2026-08-17: **1 of 20 registered sources is
+> `ACTIVE`** (the eTender OCDS API); the other 19 are `DISCOVERY` placeholders
+> that have never been crawled, **0 SOEs are registered**, and CI has **never
+> run**. The subsystems are built and tested; source coverage is at Phase 0.
+> Full measured breakdown: [`docs/status-audit.md`](docs/status-audit.md).
+
 | Component | Blueprint | Where |
 |---|---|---|
 | Database schema v2 (pgvector, provenance, review queue, append-only crawl log) | §10–11 | [`db/schema.sql`](db/schema.sql) |
@@ -33,7 +41,7 @@ approved for Phase 0/1 planning). All section references (§) below point there.
 | Source-health dashboard + alerting: SLA/MTTD/MTTR classification, `/ops/*` API, `/ops` UI, cron pager | §15, §16 (P2 MLP) | [`src/tenderza/health/`](src/tenderza/health/), [`web/app/ops/`](web/app/ops/), [`scripts/check_source_health.py`](scripts/check_source_health.py) |
 | Timezone doctrine + P0 closing-time correction (SAST-labelled-as-`Z` defect) w/ idempotent backfill | §10.2.1 | [`src/tenderza/timeutil.py`](src/tenderza/timeutil.py), [`scripts/fix_closing_timezones.py`](scripts/fix_closing_timezones.py) |
 | Local dev stack (Postgres+pgvector, Redis, MinIO) | §18 | [`infra/docker-compose.yml`](infra/docker-compose.yml) |
-| CI (lint + tests + schema-apply + registry seed) | §20 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
+| CI (lint + tests + schema-apply + registry seed) — **written but NOT ENABLED**, see [`ci/README.md`](ci/README.md) | §20 | [`ci/github-ci.yml`](ci/github-ci.yml) |
 
 ## Quick start
 
